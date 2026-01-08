@@ -30,6 +30,12 @@ if smiles_input:
             }
             st.table(pd.DataFrame(stats.items(), columns=["Property", "Value"]))
 
+            pass_rules = stats["Molecular Weight"] < 500 and stats["LogP"] < 5 and stats["H-Bond Donors"] <= 5
+            if pass_rules:
+                st.success("✅ Passes Lipinski's Rule of 5")
+            else:
+                st.warning("⚠️ Fails one or more Lipinski Rules")
+
         with col2:
             st.subheader("3D Interactive View")
             AllChem.EmbedMolecule(mol, AllChem.ETKDG())
@@ -49,7 +55,7 @@ if smiles_input:
         st.dataframe(df_coords, use_container_width=True)
         
         csv = df_coords.to_csv(index=False).encode('utf-8')
-        st.download_button("Download Coordinates as CSV", data=csv, file_name='coords.csv', mime='text/csv')
+        st.download_button("Download Coordinates as CSV", data=csv, file_name='coords_table.csv', mime='text/csv')
 
         st.divider()
 
@@ -62,21 +68,24 @@ if smiles_input:
             
             angles = np.arange(0, 370, 10)
             energies = []
-            mp = AllChem.MMFFGetMoleculeProperties(mol)
-            ff = AllChem.MMFFGetMoleculeForceField(mol, mp)
             
             for angle in angles:
-                ff.MMFFSetDihedralDeg(d_atoms[0], d_atoms[1], d_atoms[2], d_atoms[3], float(angle))
+                mp = AllChem.MMFFGetMoleculeProperties(mol)
+                ff = AllChem.MMFFGetMoleculeForceField(mol, mp)
+                # Correct RDKit Method for Dihedral Constraints
+                ff.MMFFAddDihedralConstraint(d_atoms[0], d_atoms[1], d_atoms[2], d_atoms[3], 
+                                            False, float(angle), float(angle), 100.0)
                 ff.Minimize()
                 energies.append(ff.CalcEnergy())
             
-            fig, ax = plt.subplots()
-            ax.plot(angles, energies, marker='o', color='#FF4B4B')
+            fig, ax = plt.subplots(figsize=(10, 4))
+            ax.plot(angles, energies, marker='o', linestyle='-', color='#FF4B4B')
             ax.set_xlabel("Dihedral Angle (Degrees)")
             ax.set_ylabel("Energy (kcal/mol)")
+            ax.grid(True, linestyle='--', alpha=0.6)
             st.pyplot(fig)
         else:
-            st.warning("No rotatable dihedral bonds (4 connected non-hydrogen atoms) found for PES scan.")
+            st.warning("No rotatable dihedral bonds found for PES scan.")
 
     except Exception as e:
         st.error(f"Error: {e}")
