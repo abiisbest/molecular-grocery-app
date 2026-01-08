@@ -11,6 +11,7 @@ import itertools
 st.set_page_config(page_title="Molecular Geometry Analyzer", layout="wide")
 
 st.title("Molecular Property Checker & Geometry Analyzer")
+st.write("A Capstone Project for Molecular Modelling")
 
 smiles_input = st.text_input("Enter SMILES (e.g., Butane: CCCC, Aspirin: CC(=O)OC1=CC=CC=C1C(=O)O)", "CCCC").strip()
 
@@ -93,7 +94,7 @@ if smiles_input:
 
                 # 3. Twist Angles (Dihedrals)
                 twist_list = []
-                dihedral_matches = mol.GetSubstructMatches(Chem.MolFromSmarts('[!#1]~[!#1]~[!#1]~[!#1]'))
+                dihedral_matches = mol.GetSubstructMatches(Chem.MolFromSmarts('[*]~[*]~[*]~[*]'))
                 for m in dihedral_matches:
                     syms = [mol.GetAtomWithIdx(x).GetSymbol() for x in m]
                     twist = rdMolTransforms.GetDihedralDeg(conf, m[0], m[1], m[2], m[3])
@@ -113,42 +114,51 @@ if smiles_input:
             st.divider()
 
             st.subheader("Potential Energy Surface (PES) Scan")
-            # Filter to find non-ring rotatable bonds
-            rotatable_matches = mol.GetSubstructMatches(Chem.MolFromSmarts('[!#1]~[!#1&!R]~[!#1&!R]~[!#1]'))
-            
-            if rotatable_matches:
-                d_atoms = list(rotatable_matches[0])
-                st.info(f"Scanning Twist Angle for atoms: {d_atoms} (Open-chain bond)")
+            # Selection priority: Non-ring bonds first, then any 4-atom chain
+            scan_matches = mol.GetSubstructMatches(Chem.MolFromSmarts('[!#1]~[!#1&!R]~[!#1&!R]~[!#1]'))
+            if not scan_matches:
+                scan_matches = mol.GetSubstructMatches(Chem.MolFromSmarts('[*]~[*]~[*]~[*]'))
+
+            if scan_matches:
+                d_atoms = list(scan_matches[0])
+                st.info(f"Scanning Twist Angle for atoms: {d_atoms}")
                 
                 angles = np.arange(0, 370, 10)
                 energies = []
-                for angle in angles:
+                prog_bar = st.progress(0)
+                
+                for i, angle in enumerate(angles):
                     rdMolTransforms.SetDihedralDeg(conf, d_atoms[0], d_atoms[1], d_atoms[2], d_atoms[3], float(angle))
                     mp = AllChem.MMFFGetMoleculeProperties(mol)
                     ff = AllChem.MMFFGetMoleculeForceField(mol, mp)
                     if ff:
-                        ff.Minimize(maxIts=100)
+                        # Only minimize if center bond is not in a ring
+                        bond = mol.GetBondBetweenAtoms(d_atoms[1], d_atoms[2])
+                        if bond and not bond.IsInRing():
+                            ff.Minimize(maxIts=50)
                         energies.append(ff.CalcEnergy())
                     else:
                         energies.append(np.nan)
+                    prog_bar.progress((i + 1) / len(angles))
                 
                 fig, ax = plt.subplots(figsize=(10, 4))
-                ax.plot(angles, energies, marker='o', color='#FF4B4B')
+                ax.plot(angles, energies, marker='o', color='#FF4B4B', linewidth=2)
                 ax.set_xlabel("Twist Angle (Degrees)")
                 ax.set_ylabel("Energy (kcal/mol)")
+                ax.set_title("Energy vs. Dihedral Rotation")
                 ax.grid(True, linestyle='--', alpha=0.6)
                 st.pyplot(fig)
             else:
-                st.warning("No suitable open-chain rotatable bonds found for PES scan.")
+                st.warning("Molecule size insufficient for PES scan.")
 
             st.divider()
             with st.expander("Glossary & Theory"):
                 st.write("""
-                - **Internal Coordinates**: Defines the position of atoms using distances (Lengths), angles, and dihedrals (Twist Angles).
-                - **Z-Matrix**: A classical method of representing molecular geometry using internal coordinates.
-                - **Å (Angstrom)**: Standard unit for bond lengths ($10^{-10}$ m).
-                - **Dihedral/Twist Angle**: Rotation between two planes; essential for understanding molecular conformations.
+                - **Internal Coordinates**: Describes molecular shape using Bond Lengths, Bond Angles, and Twist (Dihedral) Angles.
+                - **Z-Matrix**: A classical representation of molecules where each atom is defined by its relation to previous atoms.
+                - **Å (Angstrom)**: $10^{-10}$ meters, the standard unit for atomic distances.
+                - **PES Scan**: A Potential Energy Surface scan helps find the most stable (lowest energy) conformation of a molecule.
                 """)
 
         except Exception as e:
-            st.error(f"Error: {e}")
+            st.error(f"Error processing molecule: {e}")
