@@ -71,11 +71,11 @@ if smiles_input:
             with tab2:
                 st.subheader("Internal Coordinates")
                 
-                # Bond Lengths
                 bonds_list = []
                 for bond in mol.GetBonds():
                     idx1 = bond.GetBeginAtomIdx()
                     idx2 = bond.GetEndAtomIdx()
+                    # Using direct rdMolTransforms for length
                     length = rdMolTransforms.GetBondLength(conf, idx1, idx2)
                     bonds_list.append([
                         f"{mol.GetAtomWithIdx(idx1).GetSymbol()}({idx1})",
@@ -83,13 +83,13 @@ if smiles_input:
                         round(length, 3)
                     ])
                 
-                # Bond Angles
                 angles_list = []
                 for atom in mol.GetAtoms():
                     idx2 = atom.GetIdx()
                     neighbors = [x.GetIdx() for x in atom.GetNeighbors()]
                     if len(neighbors) >= 2:
                         for idx1, idx3 in itertools.combinations(neighbors, 2):
+                            # FIXED: Accessing through rdMolTransforms directly
                             angle = rdMolTransforms.GetBondAngleDeg(conf, idx1, idx2, idx3)
                             angles_list.append([
                                 f"{mol.GetAtomWithIdx(idx1).GetSymbol()}({idx1})",
@@ -135,16 +135,6 @@ if smiles_input:
                 st.pyplot(fig)
             else:
                 st.warning("No rotatable dihedral bonds found for PES scan.")
-
-            st.divider()
-            with st.expander("Glossary & Theory"):
-                st.write("""
-                - **SMILES**: Simplified Molecular Input Line Entry System. A text notation for chemical structures.
-                - **Lipinski's Rule of 5**: A rule of thumb to evaluate if a chemical compound has properties that would make it a likely orally active drug in humans.
-                - **Angstrom (Å)**: A unit of length equal to $10^{-10}$ meters, used for atomic distances.
-                - **PES Scan**: Potential Energy Surface scan. Shows how the total energy of a molecule changes as a specific bond is rotated.
-                - **Dihedral Angle**: The angle between two intersecting planes defined by four atoms.
-                """)
 
         except Exception as e:
             st.error(f"Error: {e}")
