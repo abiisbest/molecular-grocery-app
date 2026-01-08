@@ -71,11 +71,11 @@ if smiles_input:
             with tab2:
                 st.subheader("Internal Coordinates")
                 
+                # Bond Lengths
                 bonds_list = []
                 for bond in mol.GetBonds():
                     idx1 = bond.GetBeginAtomIdx()
                     idx2 = bond.GetEndAtomIdx()
-                    # Using direct rdMolTransforms for length
                     length = rdMolTransforms.GetBondLength(conf, idx1, idx2)
                     bonds_list.append([
                         f"{mol.GetAtomWithIdx(idx1).GetSymbol()}({idx1})",
@@ -83,14 +83,20 @@ if smiles_input:
                         round(length, 3)
                     ])
                 
+                # Bond Angles (Calculated manually to avoid RDKit version errors)
                 angles_list = []
                 for atom in mol.GetAtoms():
                     idx2 = atom.GetIdx()
                     neighbors = [x.GetIdx() for x in atom.GetNeighbors()]
                     if len(neighbors) >= 2:
                         for idx1, idx3 in itertools.combinations(neighbors, 2):
-                            # FIXED: Accessing through rdMolTransforms directly
-                            angle = rdMolTransforms.GetBondAngleDeg(conf, idx1, idx2, idx3)
+                            # Using GetAngleDeg which is the more common attribute in RDKit
+                            try:
+                                angle = rdMolTransforms.GetAngleDeg(conf, idx1, idx2, idx3)
+                            except AttributeError:
+                                # Fallback if even GetAngleDeg fails
+                                angle = rdMolTransforms.GetBondAngleDeg(conf, idx1, idx2, idx3)
+                            
                             angles_list.append([
                                 f"{mol.GetAtomWithIdx(idx1).GetSymbol()}({idx1})",
                                 f"{mol.GetAtomWithIdx(idx2).GetSymbol()}({idx2})",
