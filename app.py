@@ -54,7 +54,7 @@ if smiles_input:
 
             st.divider()
             
-            tab1, tab2 = st.tabs(["Cartesian Coordinates (XYZ)", "Internal Coordinates"])
+            tab1, tab2 = st.tabs(["Cartesian Coordinates (XYZ)", "Internal Coordinates (Z-Matrix)"])
             
             conf = mol.GetConformer()
 
@@ -63,19 +63,22 @@ if smiles_input:
                 atom_data = [[a.GetSymbol(), i, pos.x, pos.y, pos.z] for i, (a, pos) in enumerate(zip(mol.GetAtoms(), [conf.GetAtomPosition(k) for k in range(mol.GetNumAtoms())]))]
                 df_coords = pd.DataFrame(atom_data, columns=["Chemical Symbol", "Atom Number", "X", "Y", "Z"])
                 st.dataframe(df_coords, use_container_width=True)
+                
+                csv_xyz = df_coords.to_csv(index=False).encode('utf-8')
+                st.download_button("Download XYZ as CSV", data=csv_xyz, file_name='cartesian_coords.csv', mime='text/csv')
 
             with tab2:
-                st.subheader("Internal Geometry (Internal Coordinates)")
+                st.subheader("Internal Geometry Analysis")
                 
-                # 1. Bond Lengths Table
+                # 1. Bond Lengths
                 bonds_list = []
                 for bond in mol.GetBonds():
                     i1, i2 = bond.GetBeginAtomIdx(), bond.GetEndAtomIdx()
                     sym1, sym2 = mol.GetAtomWithIdx(i1).GetSymbol(), mol.GetAtomWithIdx(i2).GetSymbol()
                     length = rdMolTransforms.GetBondLength(conf, i1, i2)
-                    bonds_list.append([f"{sym1}", i1, f"{sym2}", i2, round(length, 3)])
+                    bonds_list.append([sym1, i1, sym2, i2, round(length, 3)])
                 
-                # 2. Bond Angles Table
+                # 2. Bond Angles
                 angles_list = []
                 for atom in mol.GetAtoms():
                     v_idx = atom.GetIdx()
@@ -86,33 +89,36 @@ if smiles_input:
                             s1, s3 = mol.GetAtomWithIdx(idx1).GetSymbol(), mol.GetAtomWithIdx(idx3).GetSymbol()
                             try: ang = rdMolTransforms.GetAngleDeg(conf, idx1, v_idx, idx3)
                             except: ang = rdMolTransforms.GetBondAngleDeg(conf, idx1, v_idx, idx3)
-                            angles_list.append([f"{s1}", idx1, f"{v_sym}", v_idx, f"{s3}", idx3, round(ang, 2)])
+                            angles_list.append([s1, idx1, v_sym, v_idx, s3, idx3, round(ang, 2)])
 
-                # 3. Twist Angles (Dihedral) Table
+                # 3. Twist Angles (Dihedrals)
                 twist_list = []
                 dihedral_matches = mol.GetSubstructMatches(Chem.MolFromSmarts('[!#1]~[!#1]~[!#1]~[!#1]'))
                 for m in dihedral_matches:
-                    symbols = [mol.GetAtomWithIdx(x).GetSymbol() for x in m]
+                    syms = [mol.GetAtomWithIdx(x).GetSymbol() for x in m]
                     twist = rdMolTransforms.GetDihedralDeg(conf, m[0], m[1], m[2], m[3])
-                    twist_list.append([f"{symbols[0]}", m[0], f"{symbols[1]}", m[1], f"{symbols[2]}", m[2], f"{symbols[3]}", m[3], round(twist, 2)])
+                    twist_list.append([syms[0], m[0], syms[1], m[1], syms[2], m[2], syms[3], m[3], round(twist, 2)])
 
                 st.write("**1. Bond Lengths**")
                 st.dataframe(pd.DataFrame(bonds_list, columns=["Symbol 1", "Atom No. 1", "Symbol 2", "Atom No. 2", "Bond Length (Å)"]), use_container_width=True)
                 
-                c_ang, c_twi = st.columns(2)
-                with c_ang:
+                col_a, col_t = st.columns(2)
+                with col_a:
                     st.write("**2. Bond Angles**")
                     st.dataframe(pd.DataFrame(angles_list, columns=["S1", "No.1", "Vertex Sym", "Vertex No.", "S2", "No.2", "Bond Angle (°)"]), use_container_width=True)
-                with c_twi:
+                with col_t:
                     st.write("**3. Twist Angles (Dihedrals)**")
                     st.dataframe(pd.DataFrame(twist_list, columns=["S1", "No.1", "S2", "No.2", "S3", "No.3", "S4", "No.4", "Twist Angle (°)"]), use_container_width=True)
 
             st.divider()
 
             st.subheader("Potential Energy Surface (PES) Scan")
-            if dihedral_matches:
-                d_atoms = list(dihedral_matches[0])
-                st.info(f"Scanning Twist Angle for atoms: {d_atoms}")
+            # Filter to find non-ring rotatable bonds
+            rotatable_matches = mol.GetSubstructMatches(Chem.MolFromSmarts('[!#1]~[!#1&!R]~[!#1&!R]~[!#1]'))
+            
+            if rotatable_matches:
+                d_atoms = list(rotatable_matches[0])
+                st.info(f"Scanning Twist Angle for atoms: {d_atoms} (Open-chain bond)")
                 
                 angles = np.arange(0, 370, 10)
                 energies = []
@@ -120,15 +126,29 @@ if smiles_input:
                     rdMolTransforms.SetDihedralDeg(conf, d_atoms[0], d_atoms[1], d_atoms[2], d_atoms[3], float(angle))
                     mp = AllChem.MMFFGetMoleculeProperties(mol)
                     ff = AllChem.MMFFGetMoleculeForceField(mol, mp)
-                    energies.append(ff.CalcEnergy() if ff else np.nan)
+                    if ff:
+                        ff.Minimize(maxIts=100)
+                        energies.append(ff.CalcEnergy())
+                    else:
+                        energies.append(np.nan)
                 
                 fig, ax = plt.subplots(figsize=(10, 4))
                 ax.plot(angles, energies, marker='o', color='#FF4B4B')
                 ax.set_xlabel("Twist Angle (Degrees)")
                 ax.set_ylabel("Energy (kcal/mol)")
+                ax.grid(True, linestyle='--', alpha=0.6)
                 st.pyplot(fig)
             else:
-                st.warning("No rotatable bonds found for PES scan.")
+                st.warning("No suitable open-chain rotatable bonds found for PES scan.")
+
+            st.divider()
+            with st.expander("Glossary & Theory"):
+                st.write("""
+                - **Internal Coordinates**: Defines the position of atoms using distances (Lengths), angles, and dihedrals (Twist Angles).
+                - **Z-Matrix**: A classical method of representing molecular geometry using internal coordinates.
+                - **Å (Angstrom)**: Standard unit for bond lengths ($10^{-10}$ m).
+                - **Dihedral/Twist Angle**: Rotation between two planes; essential for understanding molecular conformations.
+                """)
 
         except Exception as e:
             st.error(f"Error: {e}")
