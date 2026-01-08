@@ -3,14 +3,15 @@ import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
 from rdkit import Chem
-from rdkit.Chem import AllChem, Descriptors
-from rdkit.Chem import Draw
+from rdkit.Chem import AllChem, Descriptors, Draw
+import py3Dmol
+from stmol import showmol
 
 st.set_page_config(page_title="Molecular Grocery List & PES Scanner", layout="wide")
 
 st.title("Molecular Property Checker & PES Scanner")
 
-smiles_input = st.text_input("Enter SMILES (e.g., Ethanol: CCO, Butane: CCCC)", "CCCC")
+smiles_input = st.text_input("Enter SMILES (e.g., Butane: CCCC, Aspirin: CC(=O)OC1=CC=CC=C1C(=O)O)", "CCCC")
 
 if smiles_input:
     try:
@@ -30,35 +31,37 @@ if smiles_input:
             st.table(pd.DataFrame(stats.items(), columns=["Property", "Value"]))
 
         with col2:
-            st.subheader("2D Structure")
-            img = Draw.MolToImage(mol)
-            st.image(img)
+            st.subheader("3D Interactive View")
+            AllChem.EmbedMolecule(mol, AllChem.ETKDG())
+            mblock = Chem.MolToPDBBlock(mol)
+            view = py3Dmol.view(width=400, height=300)
+            view.addModel(mblock, 'pdb')
+            view.setStyle({'stick': {}, 'sphere': {'scale': 0.3}})
+            view.zoomTo()
+            showmol(view, height=300, width=400)
 
         st.divider()
         
         st.subheader("3D Coordinate Table")
-        AllChem.EmbedMolecule(mol, AllChem.ETKDG())
         conf = mol.GetConformer()
-        
-        atom_data = []
-        for i, atom in enumerate(mol.GetAtoms()):
-            pos = conf.GetAtomPosition(i)
-            atom_data.append([atom.GetSymbol(), pos.x, pos.y, pos.z])
-        
+        atom_data = [[a.GetSymbol(), pos.x, pos.y, pos.z] for a, pos in zip(mol.GetAtoms(), [conf.GetAtomPosition(i) for i in range(mol.GetNumAtoms())])]
         df_coords = pd.DataFrame(atom_data, columns=["Element", "X", "Y", "Z"])
         st.dataframe(df_coords, use_container_width=True)
-
+        
         csv = df_coords.to_csv(index=False).encode('utf-8')
         st.download_button("Download Coordinates as CSV", data=csv, file_name='coords.csv', mime='text/csv')
 
         st.divider()
 
         st.subheader("Potential Energy Surface (PES) Scan")
-        if mol.GetNumAtoms() >= 4:
+        rotatable_bonds = mol.GetSubstructMatches(Chem.MolFromSmarts('[!#1]~[!#1]~[!#1]~[!#1]'))
+        
+        if rotatable_bonds:
+            d_atoms = list(rotatable_bonds[0])
+            st.info(f"Scanning Dihedral Angle for atoms: {d_atoms}")
+            
             angles = np.arange(0, 370, 10)
             energies = []
-            d_atoms = [0, 1, 2, 3] 
-            
             mp = AllChem.MMFFGetMoleculeProperties(mol)
             ff = AllChem.MMFFGetMoleculeForceField(mol, mp)
             
@@ -68,12 +71,12 @@ if smiles_input:
                 energies.append(ff.CalcEnergy())
             
             fig, ax = plt.subplots()
-            ax.plot(angles, energies, marker='o', color='red')
+            ax.plot(angles, energies, marker='o', color='#FF4B4B')
             ax.set_xlabel("Dihedral Angle (Degrees)")
             ax.set_ylabel("Energy (kcal/mol)")
             st.pyplot(fig)
         else:
-            st.error("Need at least 4 atoms for a PES scan.")
+            st.warning("No rotatable dihedral bonds (4 connected non-hydrogen atoms) found for PES scan.")
 
     except Exception as e:
         st.error(f"Error: {e}")
