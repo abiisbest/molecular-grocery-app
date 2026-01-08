@@ -1,7 +1,7 @@
 import streamlit as st
 import pandas as pd
 import numpy as np
-import matplotlib.pyplot as plt
+import plotly.graph_objects as go
 from rdkit import Chem
 from rdkit.Chem import AllChem, Descriptors, rdMolTransforms
 import py3Dmol
@@ -10,8 +10,8 @@ import itertools
 
 st.set_page_config(page_title="Molecular Geometry Analyzer", layout="wide")
 
-st.title("Molecular Property Checker & 3D Geometry Analyzer")
-st.write("Capstone Project: Internal Coordinates & 3D Potential Energy Surfaces")
+st.title("Molecular Property Checker & Interactive 3D Analyzer")
+st.write("Capstone Project: Internal Coordinates & Dynamic 3D PES")
 
 smiles_input = st.text_input("Enter SMILES (e.g., Pentane: CCCCC, Aspirin: CC(=O)OC1=CC=CC=C1C(=O)O)", "CCCCC").strip()
 
@@ -19,7 +19,7 @@ if smiles_input:
     mol = Chem.MolFromSmiles(smiles_input)
     
     if mol is None:
-        st.error("Invalid SMILES. Please check your structure (e.g., check for typos or incorrect casing).")
+        st.error("Invalid SMILES. Please check your structure.")
     else:
         try:
             mol = Chem.AddHs(mol)
@@ -67,12 +67,10 @@ if smiles_input:
             with tab2:
                 st.subheader("Internal Geometry Analysis")
                 
-                # Bond Lengths
                 b_list = [[mol.GetAtomWithIdx(b.GetBeginAtomIdx()).GetSymbol(), b.GetBeginAtomIdx(), 
                            mol.GetAtomWithIdx(b.GetEndAtomIdx()).GetSymbol(), b.GetEndAtomIdx(), 
                            round(rdMolTransforms.GetBondLength(conf, b.GetBeginAtomIdx(), b.GetEndAtomIdx()), 3)] for b in mol.GetBonds()]
                 
-                # Bond Angles
                 a_list = []
                 for atom in mol.GetAtoms():
                     v_idx, v_sym = atom.GetIdx(), atom.GetSymbol()
@@ -83,7 +81,6 @@ if smiles_input:
                             except: ang = rdMolTransforms.GetBondAngleDeg(conf, idx1, v_idx, idx3)
                             a_list.append([mol.GetAtomWithIdx(idx1).GetSymbol(), idx1, v_sym, v_idx, mol.GetAtomWithIdx(idx3).GetSymbol(), idx3, round(ang, 2)])
 
-                # Twist Angles (Dihedrals)
                 t_list = []
                 dihedral_matches = mol.GetSubstructMatches(Chem.MolFromSmarts('[!#1]~[!#1]~[!#1]~[!#1]'))
                 for m in dihedral_matches:
@@ -103,17 +100,15 @@ if smiles_input:
 
             st.divider()
 
-            st.subheader("3D Potential Energy Surface (PES) Scan")
-            # Select open-chain rotatable bonds
+            st.subheader("Interactive Potential Energy Surface (PES) Scan")
             scan_matches = mol.GetSubstructMatches(Chem.MolFromSmarts('[!#1]~[!#1&!R]~[!#1&!R]~[!#1]'))
             
             if len(scan_matches) >= 2:
                 d1, d2 = list(scan_matches[0]), list(scan_matches[1])
                 st.info(f"Scanning interaction: Bond {d1} vs Bond {d2}")
                 
-                steps = np.arange(0, 380, 20) # 20 deg resolution for performance
-                X, Y = np.meshgrid(steps, steps)
-                Z = np.zeros(X.shape)
+                steps = np.arange(0, 380, 20)
+                Z = np.zeros((len(steps), len(steps)))
                 
                 pb = st.progress(0)
                 total = len(steps)**2
@@ -127,17 +122,22 @@ if smiles_input:
                         Z[i, j] = ff.CalcEnergy() if ff else 0
                         pb.progress(((i * len(steps)) + j + 1) / total)
 
-                fig = plt.figure(figsize=(10, 7))
-                ax = fig.add_subplot(111, projection='3d')
-                surf = ax.plot_surface(X, Y, Z, cmap='magma', edgecolor='none', alpha=0.9)
-                ax.set_xlabel('Twist 1 (°)')
-                ax.set_ylabel('Twist 2 (°)')
-                ax.set_zlabel('Energy (kcal/mol)')
-                fig.colorbar(surf, ax=ax, shrink=0.5, aspect=5)
-                st.pyplot(fig)
+                # Plotly Interactive 3D Surface
+                fig = go.Figure(data=[go.Surface(z=Z, x=steps, y=steps, colorscale='Viridis')])
+                fig.update_layout(
+                    title='Rotatable 3D Energy Surface',
+                    scene = dict(
+                        xaxis_title='Twist 1 (°)',
+                        yaxis_title='Twist 2 (°)',
+                        zaxis_title='Energy (kcal/mol)'
+                    ),
+                    autosize=False,
+                    width=800, height=800,
+                    margin=dict(l=65, r=50, b=65, t=90)
+                )
+                st.plotly_chart(fig, use_container_width=True)
                 
             elif len(scan_matches) == 1:
-                st.info("Only 1 rotatable bond found. Displaying 2D PES Scan.")
                 d1 = list(scan_matches[0])
                 angles = np.arange(0, 370, 10)
                 energies = []
@@ -148,13 +148,10 @@ if smiles_input:
                     if ff:
                         ff.Minimize(maxIts=50)
                         energies.append(ff.CalcEnergy())
-                fig, ax = plt.subplots(figsize=(10, 4))
-                ax.plot(angles, energies, marker='o', color='#FF4B4B')
-                ax.set_xlabel("Twist Angle (Degrees)")
-                ax.set_ylabel("Energy (kcal/mol)")
-                st.pyplot(fig)
-            else:
-                st.warning("No rotatable bonds found for a PES scan.")
+                
+                fig = go.Figure(data=go.Scatter(x=angles, y=energies, mode='lines+markers', line=dict(color='firebrick')))
+                fig.update_layout(title='2D Energy Scan', xaxis_title='Twist Angle (°)', yaxis_title='Energy (kcal/mol)')
+                st.plotly_chart(fig, use_container_width=True)
 
         except Exception as e:
             st.error(f"Error: {e}")
