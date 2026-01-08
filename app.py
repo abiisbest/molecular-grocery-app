@@ -3,7 +3,7 @@ import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
 from rdkit import Chem
-from rdkit.Chem import AllChem, Descriptors, Draw
+from rdkit.Chem import AllChem, Descriptors, rdMolTransforms
 import py3Dmol
 from stmol import showmol
 
@@ -17,6 +17,7 @@ if smiles_input:
     try:
         mol = Chem.MolFromSmiles(smiles_input)
         mol = Chem.AddHs(mol)
+        AllChem.EmbedMolecule(mol, AllChem.ETKDG())
         
         col1, col2 = st.columns(2)
         
@@ -38,7 +39,6 @@ if smiles_input:
 
         with col2:
             st.subheader("3D Interactive View")
-            AllChem.EmbedMolecule(mol, AllChem.ETKDG())
             mblock = Chem.MolToPDBBlock(mol)
             view = py3Dmol.view(width=400, height=300)
             view.addModel(mblock, 'pdb')
@@ -70,13 +70,16 @@ if smiles_input:
             energies = []
             
             for angle in angles:
+                # Manually set the dihedral angle
+                rdMolTransforms.SetDihedralDeg(mol.GetConformer(), d_atoms[0], d_atoms[1], d_atoms[2], d_atoms[3], float(angle))
+                
+                # Calculate energy of the new conformation
                 mp = AllChem.MMFFGetMoleculeProperties(mol)
                 ff = AllChem.MMFFGetMoleculeForceField(mol, mp)
-                # Correct RDKit Method for Dihedral Constraints
-                ff.MMFFAddDihedralConstraint(d_atoms[0], d_atoms[1], d_atoms[2], d_atoms[3], 
-                                            False, float(angle), float(angle), 100.0)
-                ff.Minimize()
-                energies.append(ff.CalcEnergy())
+                if ff:
+                    energies.append(ff.CalcEnergy())
+                else:
+                    energies.append(np.nan)
             
             fig, ax = plt.subplots(figsize=(10, 4))
             ax.plot(angles, energies, marker='o', linestyle='-', color='#FF4B4B')
