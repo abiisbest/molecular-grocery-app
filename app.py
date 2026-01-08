@@ -14,7 +14,6 @@ st.title("Molecular Property Checker & PES Scanner")
 smiles_input = st.text_input("Enter SMILES (e.g., Butane: CCCC, Aspirin: CC(=O)OC1=CC=CC=C1C(=O)O)", "CCCC").strip()
 
 if smiles_input:
-    # Validation Check
     mol = Chem.MolFromSmiles(smiles_input)
     
     if mol is None:
@@ -22,9 +21,7 @@ if smiles_input:
     else:
         try:
             mol = Chem.AddHs(mol)
-            # Ensure 3D coordinates are generated
             if AllChem.EmbedMolecule(mol, AllChem.ETKDG()) == -1:
-                # Fallback for difficult molecules
                 AllChem.Compute2DCoords(mol)
                 st.warning("Could not generate 3D coordinates; showing 2D projection.")
             
@@ -57,19 +54,61 @@ if smiles_input:
 
             st.divider()
             
-            st.subheader("3D Coordinate Table")
-            conf = mol.GetConformer()
-            atom_data = [[a.GetSymbol(), pos.x, pos.y, pos.z] for a, pos in zip(mol.GetAtoms(), [conf.GetAtomPosition(i) for i in range(mol.GetNumAtoms())])]
-            df_coords = pd.DataFrame(atom_data, columns=["Element", "X", "Y", "Z"])
-            st.dataframe(df_coords, use_container_width=True)
+            tab1, tab2 = st.tabs(["Cartesian Coordinates (XYZ)", "Internal Coordinates"])
             
-            csv = df_coords.to_csv(index=False).encode('utf-8')
-            st.download_button("Download Coordinates as CSV", data=csv, file_name='coords_table.csv', mime='text/csv')
+            with tab1:
+                st.subheader("3D Cartesian Coordinate Table")
+                conf = mol.GetConformer()
+                atom_data = [[a.GetSymbol(), i, pos.x, pos.y, pos.z] for i, (a, pos) in enumerate(zip(mol.GetAtoms(), [conf.GetAtomPosition(k) for k in range(mol.GetNumAtoms())]))]
+                df_coords = pd.DataFrame(atom_data, columns=["Element", "Index", "X", "Y", "Z"])
+                st.dataframe(df_coords, use_container_width=True)
+                
+                csv_xyz = df_coords.to_csv(index=False).encode('utf-8')
+                st.download_button("Download XYZ as CSV", data=csv_xyz, file_name='cartesian_coords.csv', mime='text/csv')
+
+            with tab2:
+                st.subheader("Internal Coordinates (Bond Lengths & Angles)")
+                
+                # Bond Lengths
+                bonds_list = []
+                for bond in mol.GetBonds():
+                    idx1 = bond.GetBeginAtomIdx()
+                    idx2 = bond.GetEndAtomIdx()
+                    length = rdMolTransforms.GetBondLength(mol.GetConformer(), idx1, idx2)
+                    bonds_list.append([
+                        f"{mol.GetAtomWithIdx(idx1).GetSymbol()}({idx1})",
+                        f"{mol.GetAtomWithIdx(idx2).GetSymbol()}({idx2})",
+                        round(length, 3)
+                    ])
+                
+                # Bond Angles (Triplets)
+                # We find all paths of length 2 (A-B-C) to get angles
+                angles_list = []
+                for atom in mol.GetAtoms():
+                    idx2 = atom.GetIdx()
+                    neighbors = [x.GetIdx() for x in atom.GetNeighbors()]
+                    if len(neighbors) >= 2:
+                        import itertools
+                        for idx1, idx3 in itertools.combinations(neighbors, 2):
+                            angle = rdMolTransforms.GetBondAngleDeg(mol.GetConformer(), idx1, idx2, idx3)
+                            angles_list.append([
+                                f"{mol.GetAtomWithIdx(idx1).GetSymbol()}({idx1})",
+                                f"{mol.GetAtomWithIdx(idx2).GetSymbol()}({idx2})",
+                                f"{mol.GetAtomWithIdx(idx3).GetSymbol()}({idx3})",
+                                round(angle, 2)
+                            ])
+
+                col_b, col_a = st.columns(2)
+                with col_b:
+                    st.write("**Bond Lengths**")
+                    st.dataframe(pd.DataFrame(bonds_list, columns=["Atom 1", "Atom 2", "Length (Å)"]), use_container_width=True)
+                with col_a:
+                    st.write("**Bond Angles**")
+                    st.dataframe(pd.DataFrame(angles_list, columns=["Atom 1", "Vertex", "Atom 2", "Angle (°)"]), use_container_width=True)
 
             st.divider()
 
             st.subheader("Potential Energy Surface (PES) Scan")
-            # Select 4 connected non-hydrogen atoms
             rotatable_bonds = mol.GetSubstructMatches(Chem.MolFromSmarts('[!#1]~[!#1]~[!#1]~[!#1]'))
             
             if rotatable_bonds:
