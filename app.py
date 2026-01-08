@@ -6,6 +6,7 @@ from rdkit import Chem
 from rdkit.Chem import AllChem, Descriptors, rdMolTransforms
 import py3Dmol
 from stmol import showmol
+import itertools
 
 st.set_page_config(page_title="Molecular Grocery List & PES Scanner", layout="wide")
 
@@ -56,9 +57,10 @@ if smiles_input:
             
             tab1, tab2 = st.tabs(["Cartesian Coordinates (XYZ)", "Internal Coordinates"])
             
+            conf = mol.GetConformer()
+
             with tab1:
                 st.subheader("3D Cartesian Coordinate Table")
-                conf = mol.GetConformer()
                 atom_data = [[a.GetSymbol(), i, pos.x, pos.y, pos.z] for i, (a, pos) in enumerate(zip(mol.GetAtoms(), [conf.GetAtomPosition(k) for k in range(mol.GetNumAtoms())]))]
                 df_coords = pd.DataFrame(atom_data, columns=["Element", "Index", "X", "Y", "Z"])
                 st.dataframe(df_coords, use_container_width=True)
@@ -67,30 +69,28 @@ if smiles_input:
                 st.download_button("Download XYZ as CSV", data=csv_xyz, file_name='cartesian_coords.csv', mime='text/csv')
 
             with tab2:
-                st.subheader("Internal Coordinates (Bond Lengths & Angles)")
+                st.subheader("Internal Coordinates")
                 
                 # Bond Lengths
                 bonds_list = []
                 for bond in mol.GetBonds():
                     idx1 = bond.GetBeginAtomIdx()
                     idx2 = bond.GetEndAtomIdx()
-                    length = rdMolTransforms.GetBondLength(mol.GetConformer(), idx1, idx2)
+                    length = rdMolTransforms.GetBondLength(conf, idx1, idx2)
                     bonds_list.append([
                         f"{mol.GetAtomWithIdx(idx1).GetSymbol()}({idx1})",
                         f"{mol.GetAtomWithIdx(idx2).GetSymbol()}({idx2})",
                         round(length, 3)
                     ])
                 
-                # Bond Angles (Triplets)
-                # We find all paths of length 2 (A-B-C) to get angles
+                # Bond Angles
                 angles_list = []
                 for atom in mol.GetAtoms():
                     idx2 = atom.GetIdx()
                     neighbors = [x.GetIdx() for x in atom.GetNeighbors()]
                     if len(neighbors) >= 2:
-                        import itertools
                         for idx1, idx3 in itertools.combinations(neighbors, 2):
-                            angle = rdMolTransforms.GetBondAngleDeg(mol.GetConformer(), idx1, idx2, idx3)
+                            angle = rdMolTransforms.GetBondAngleDeg(conf, idx1, idx2, idx3)
                             angles_list.append([
                                 f"{mol.GetAtomWithIdx(idx1).GetSymbol()}({idx1})",
                                 f"{mol.GetAtomWithIdx(idx2).GetSymbol()}({idx2})",
@@ -100,11 +100,11 @@ if smiles_input:
 
                 col_b, col_a = st.columns(2)
                 with col_b:
-                    st.write("**Bond Lengths**")
-                    st.dataframe(pd.DataFrame(bonds_list, columns=["Atom 1", "Atom 2", "Length (Å)"]), use_container_width=True)
+                    st.write("**Bond Lengths (Å)**")
+                    st.dataframe(pd.DataFrame(bonds_list, columns=["Atom 1", "Atom 2", "Length"]), use_container_width=True)
                 with col_a:
-                    st.write("**Bond Angles**")
-                    st.dataframe(pd.DataFrame(angles_list, columns=["Atom 1", "Vertex", "Atom 2", "Angle (°)"]), use_container_width=True)
+                    st.write("**Bond Angles (°)**")
+                    st.dataframe(pd.DataFrame(angles_list, columns=["Atom 1", "Vertex", "Atom 2", "Angle"]), use_container_width=True)
 
             st.divider()
 
@@ -119,7 +119,7 @@ if smiles_input:
                 energies = []
                 
                 for angle in angles:
-                    rdMolTransforms.SetDihedralDeg(mol.GetConformer(), d_atoms[0], d_atoms[1], d_atoms[2], d_atoms[3], float(angle))
+                    rdMolTransforms.SetDihedralDeg(conf, d_atoms[0], d_atoms[1], d_atoms[2], d_atoms[3], float(angle))
                     mp = AllChem.MMFFGetMoleculeProperties(mol)
                     ff = AllChem.MMFFGetMoleculeForceField(mol, mp)
                     if ff:
@@ -135,6 +135,16 @@ if smiles_input:
                 st.pyplot(fig)
             else:
                 st.warning("No rotatable dihedral bonds found for PES scan.")
+
+            st.divider()
+            with st.expander("Glossary & Theory"):
+                st.write("""
+                - **SMILES**: Simplified Molecular Input Line Entry System. A text notation for chemical structures.
+                - **Lipinski's Rule of 5**: A rule of thumb to evaluate if a chemical compound has properties that would make it a likely orally active drug in humans.
+                - **Angstrom (Å)**: A unit of length equal to $10^{-10}$ meters, used for atomic distances.
+                - **PES Scan**: Potential Energy Surface scan. Shows how the total energy of a molecule changes as a specific bond is rotated.
+                - **Dihedral Angle**: The angle between two intersecting planes defined by four atoms.
+                """)
 
         except Exception as e:
             st.error(f"Error: {e}")
