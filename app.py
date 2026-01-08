@@ -8,9 +8,9 @@ import py3Dmol
 from stmol import showmol
 import itertools
 
-st.set_page_config(page_title="Molecular Grocery List & PES Scanner", layout="wide")
+st.set_page_config(page_title="Molecular Geometry Analyzer", layout="wide")
 
-st.title("Molecular Property Checker & PES Scanner")
+st.title("Molecular Property Checker & Geometry Analyzer")
 
 smiles_input = st.text_input("Enter SMILES (e.g., Butane: CCCC, Aspirin: CC(=O)OC1=CC=CC=C1C(=O)O)", "CCCC").strip()
 
@@ -38,8 +38,7 @@ if smiles_input:
                 }
                 st.table(pd.DataFrame(stats.items(), columns=["Property", "Value"]))
 
-                pass_rules = stats["Molecular Weight"] < 500 and stats["LogP"] < 5 and stats["H-Bond Donors"] <= 5
-                if pass_rules:
+                if stats["Molecular Weight"] < 500 and stats["LogP"] < 5 and stats["H-Bond Donors"] <= 5:
                     st.success("✅ Passes Lipinski's Rule of 5")
                 else:
                     st.warning("⚠️ Fails one or more Lipinski Rules")
@@ -60,87 +59,76 @@ if smiles_input:
             conf = mol.GetConformer()
 
             with tab1:
-                st.subheader("3D Cartesian Coordinate Table")
+                st.subheader("3D Cartesian Coordinates")
                 atom_data = [[a.GetSymbol(), i, pos.x, pos.y, pos.z] for i, (a, pos) in enumerate(zip(mol.GetAtoms(), [conf.GetAtomPosition(k) for k in range(mol.GetNumAtoms())]))]
-                df_coords = pd.DataFrame(atom_data, columns=["Element", "Index", "X", "Y", "Z"])
+                df_coords = pd.DataFrame(atom_data, columns=["Chemical Symbol", "Atom Number", "X", "Y", "Z"])
                 st.dataframe(df_coords, use_container_width=True)
-                
-                csv_xyz = df_coords.to_csv(index=False).encode('utf-8')
-                st.download_button("Download XYZ as CSV", data=csv_xyz, file_name='cartesian_coords.csv', mime='text/csv')
 
             with tab2:
-                st.subheader("Internal Coordinates")
+                st.subheader("Internal Geometry (Internal Coordinates)")
                 
-                # Bond Lengths
+                # 1. Bond Lengths Table
                 bonds_list = []
                 for bond in mol.GetBonds():
-                    idx1 = bond.GetBeginAtomIdx()
-                    idx2 = bond.GetEndAtomIdx()
-                    length = rdMolTransforms.GetBondLength(conf, idx1, idx2)
-                    bonds_list.append([
-                        f"{mol.GetAtomWithIdx(idx1).GetSymbol()}({idx1})",
-                        f"{mol.GetAtomWithIdx(idx2).GetSymbol()}({idx2})",
-                        round(length, 3)
-                    ])
+                    i1, i2 = bond.GetBeginAtomIdx(), bond.GetEndAtomIdx()
+                    sym1, sym2 = mol.GetAtomWithIdx(i1).GetSymbol(), mol.GetAtomWithIdx(i2).GetSymbol()
+                    length = rdMolTransforms.GetBondLength(conf, i1, i2)
+                    bonds_list.append([f"{sym1}", i1, f"{sym2}", i2, round(length, 3)])
                 
-                # Bond Angles (Calculated manually to avoid RDKit version errors)
+                # 2. Bond Angles Table
                 angles_list = []
                 for atom in mol.GetAtoms():
-                    idx2 = atom.GetIdx()
-                    neighbors = [x.GetIdx() for x in atom.GetNeighbors()]
-                    if len(neighbors) >= 2:
-                        for idx1, idx3 in itertools.combinations(neighbors, 2):
-                            # Using GetAngleDeg which is the more common attribute in RDKit
-                            try:
-                                angle = rdMolTransforms.GetAngleDeg(conf, idx1, idx2, idx3)
-                            except AttributeError:
-                                # Fallback if even GetAngleDeg fails
-                                angle = rdMolTransforms.GetBondAngleDeg(conf, idx1, idx2, idx3)
-                            
-                            angles_list.append([
-                                f"{mol.GetAtomWithIdx(idx1).GetSymbol()}({idx1})",
-                                f"{mol.GetAtomWithIdx(idx2).GetSymbol()}({idx2})",
-                                f"{mol.GetAtomWithIdx(idx3).GetSymbol()}({idx3})",
-                                round(angle, 2)
-                            ])
+                    v_idx = atom.GetIdx()
+                    v_sym = atom.GetSymbol()
+                    nbs = [x.GetIdx() for x in atom.GetNeighbors()]
+                    if len(nbs) >= 2:
+                        for idx1, idx3 in itertools.combinations(nbs, 2):
+                            s1, s3 = mol.GetAtomWithIdx(idx1).GetSymbol(), mol.GetAtomWithIdx(idx3).GetSymbol()
+                            try: ang = rdMolTransforms.GetAngleDeg(conf, idx1, v_idx, idx3)
+                            except: ang = rdMolTransforms.GetBondAngleDeg(conf, idx1, v_idx, idx3)
+                            angles_list.append([f"{s1}", idx1, f"{v_sym}", v_idx, f"{s3}", idx3, round(ang, 2)])
 
-                col_b, col_a = st.columns(2)
-                with col_b:
-                    st.write("**Bond Lengths (Å)**")
-                    st.dataframe(pd.DataFrame(bonds_list, columns=["Atom 1", "Atom 2", "Length"]), use_container_width=True)
-                with col_a:
-                    st.write("**Bond Angles (°)**")
-                    st.dataframe(pd.DataFrame(angles_list, columns=["Atom 1", "Vertex", "Atom 2", "Angle"]), use_container_width=True)
+                # 3. Twist Angles (Dihedral) Table
+                twist_list = []
+                dihedral_matches = mol.GetSubstructMatches(Chem.MolFromSmarts('[!#1]~[!#1]~[!#1]~[!#1]'))
+                for m in dihedral_matches:
+                    symbols = [mol.GetAtomWithIdx(x).GetSymbol() for x in m]
+                    twist = rdMolTransforms.GetDihedralDeg(conf, m[0], m[1], m[2], m[3])
+                    twist_list.append([f"{symbols[0]}", m[0], f"{symbols[1]}", m[1], f"{symbols[2]}", m[2], f"{symbols[3]}", m[3], round(twist, 2)])
+
+                st.write("**1. Bond Lengths**")
+                st.dataframe(pd.DataFrame(bonds_list, columns=["Symbol 1", "Atom No. 1", "Symbol 2", "Atom No. 2", "Bond Length (Å)"]), use_container_width=True)
+                
+                c_ang, c_twi = st.columns(2)
+                with c_ang:
+                    st.write("**2. Bond Angles**")
+                    st.dataframe(pd.DataFrame(angles_list, columns=["S1", "No.1", "Vertex Sym", "Vertex No.", "S2", "No.2", "Bond Angle (°)"]), use_container_width=True)
+                with c_twi:
+                    st.write("**3. Twist Angles (Dihedrals)**")
+                    st.dataframe(pd.DataFrame(twist_list, columns=["S1", "No.1", "S2", "No.2", "S3", "No.3", "S4", "No.4", "Twist Angle (°)"]), use_container_width=True)
 
             st.divider()
 
             st.subheader("Potential Energy Surface (PES) Scan")
-            rotatable_bonds = mol.GetSubstructMatches(Chem.MolFromSmarts('[!#1]~[!#1]~[!#1]~[!#1]'))
-            
-            if rotatable_bonds:
-                d_atoms = list(rotatable_bonds[0])
-                st.info(f"Scanning Dihedral Angle for atoms: {d_atoms}")
+            if dihedral_matches:
+                d_atoms = list(dihedral_matches[0])
+                st.info(f"Scanning Twist Angle for atoms: {d_atoms}")
                 
                 angles = np.arange(0, 370, 10)
                 energies = []
-                
                 for angle in angles:
                     rdMolTransforms.SetDihedralDeg(conf, d_atoms[0], d_atoms[1], d_atoms[2], d_atoms[3], float(angle))
                     mp = AllChem.MMFFGetMoleculeProperties(mol)
                     ff = AllChem.MMFFGetMoleculeForceField(mol, mp)
-                    if ff:
-                        energies.append(ff.CalcEnergy())
-                    else:
-                        energies.append(np.nan)
+                    energies.append(ff.CalcEnergy() if ff else np.nan)
                 
                 fig, ax = plt.subplots(figsize=(10, 4))
-                ax.plot(angles, energies, marker='o', linestyle='-', color='#FF4B4B')
-                ax.set_xlabel("Dihedral Angle (Degrees)")
+                ax.plot(angles, energies, marker='o', color='#FF4B4B')
+                ax.set_xlabel("Twist Angle (Degrees)")
                 ax.set_ylabel("Energy (kcal/mol)")
-                ax.grid(True, linestyle='--', alpha=0.6)
                 st.pyplot(fig)
             else:
-                st.warning("No rotatable dihedral bonds found for PES scan.")
+                st.warning("No rotatable bonds found for PES scan.")
 
         except Exception as e:
             st.error(f"Error: {e}")
