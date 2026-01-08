@@ -5,3 +5,4 @@ pandas
 numpy
 py3Dmol
 stmol
+ipython_genutils
