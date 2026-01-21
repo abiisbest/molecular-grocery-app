@@ -10,89 +10,99 @@ import itertools
 
 st.set_page_config(page_title="Bio-Chem Research Suite", layout="wide")
 
-# --- SIDEBAR: EDUCATIONAL SUITE ---
+# --- CUSTOM STYLING ---
+st.markdown("""
+    <style>
+    .main { background-color: #f5f7f9; }
+    .stTabs [data-baseweb="tab-list"] { gap: 24px; }
+    .stTabs [data-baseweb="tab"] { height: 50px; white-space: pre-wrap; background-color: #f0f2f6; border-radius: 4px 4px 0px 0px; gap: 1px; }
+    .stTabs [aria-selected="true"] { background-color: #4e79a7; color: white; }
+    </style>
+    """, unsafe_allow_html=True)
+
+# --- SIDEBAR ---
 with st.sidebar:
-    st.header("🔬 Researcher's Handbook")
-    st.info("""
-    **LogP:** Measures how well a drug dissolves in fats vs. water. High LogP = better absorption but harder to excrete.
-    
-    **TPSA:** Polar Surface Area. Values < 140 Å² are usually needed for cell penetration.
-    
-    **PES Scan:** Shows how 'flexible' a molecule is. Deep valleys represent the most stable shapes (conformers).
-    """)
-    st.divider()
-    st.subheader("Reference Standards")
-    st.write("- **Lipinski's Rule:** MW < 500, LogP < 5, HBD < 5, HBA < 10.")
+    st.title("🔬 Research Assistant")
+    st.info("This integrated platform provides high-fidelity molecular analysis for drug discovery and structural biology.")
+    st.subheader("Quick Guide")
+    st.write("1. Enter a **SMILES** string.")
+    st.write("2. Navigate through the **Tabs** for specific analyses.")
+    st.write("3. Export data from the **Geometry** tab.")
 
-# --- MAIN INTERFACE ---
-st.title("Integrated Molecular Modeling & Property Prediction Platform")
-st.write("A comprehensive computational suite for lead optimization and conformational analysis.")
-
-smiles_input = st.text_input("Input SMILES String:", "CC(=O)OC1=CC=CC=C1C(=O)O")
+# --- APP HEADER ---
+st.title("Integrated Computational Platform for Molecular Intelligence")
+smiles_input = st.text_input("Enter SMILES String (e.g., Aspirin, Caffeine, or a custom chain):", "CC(=O)OC1=CC=CC=C1C(=O)O").strip()
 
 def get_bioisosteres(mol):
     replacements = {
-        "C(=O)O": ["c1nn[nH]n1", "S(=O)(=O)O"],
-        "C(=O)N": ["C(=S)N", "c1nno[nH]1"],
-        "OH": ["F", "NH2", "SH"],
-        "Cl": ["CF3", "CH3"],
+        "C(=O)O": ["c1nn[nH]n1 (Tetrazole)", "S(=O)(=O)O (Sulfonic Acid)"],
+        "C(=O)N": ["C(=S)N (Thioamide)", "c1nno[nH]1 (Oxadiazole)"],
+        "OH": ["F (Fluorine)", "NH2 (Amine)", "SH (Thiol)"],
+        "Cl": ["CF3 (Trifluoromethyl)", "CH3 (Methyl)"],
     }
     suggestions = []
     clean_mol = Chem.RemoveHs(mol)
     smiles = Chem.MolToSmiles(clean_mol)
     for pattern, reps in replacements.items():
         if pattern in smiles:
-            for r in reps:
-                suggestions.append(smiles.replace(pattern, r))
+            for r in reps: suggestions.append(smiles.replace(pattern, r))
     return list(set(suggestions))
 
 if smiles_input:
     mol = Chem.MolFromSmiles(smiles_input)
     
     if mol is None:
-        st.error("Invalid SMILES structure.")
+        st.error("Invalid SMILES structure. Please verify the input.")
     else:
         try:
-            # 1. PREPARATION
             mol = Chem.AddHs(mol)
             AllChem.EmbedMolecule(mol, AllChem.ETKDG())
             conf = mol.GetConformer()
-            
-            # 2. ANALYSIS COLUMNS
-            col1, col2 = st.columns([1, 1.5])
-            
-            with col1:
-                st.subheader("📋 Molecular Descriptors")
-                stats = {
-                    "Molecular Weight": round(Descriptors.MolWt(mol), 2),
-                    "LogP (Hydrophobicity)": round(Descriptors.MolLogP(mol), 2),
-                    "H-Bond Donors": Descriptors.NumHDonors(mol),
-                    "H-Bond Acceptors": Descriptors.NumHAcceptors(mol),
-                    "TPSA (Å²)": round(Descriptors.TPSA(mol), 2)
-                }
-                df_stats = pd.DataFrame(stats.items(), columns=["Property", "Value"])
-                st.table(df_stats)
 
-                # Drug-likeness Validation
-                is_drug_like = (stats["Molecular Weight"] <= 500 and stats["LogP (Hydrophobicity)"] <= 5)
-                if is_drug_like:
-                    st.success("✅ Favorable Drug-Likeness Profile")
-                else:
-                    st.warning("⚠️ Molecule may face bioavailability issues.")
+            # --- TABBED INTERFACE ---
+            tab1, tab2, tab3, tab4 = st.tabs([
+                "📋 Property Analytics", 
+                "⚛️ 3D Hotspot Mapping", 
+                "📐 Geometry & Export", 
+                "🔋 Energy Landscapes"
+            ])
 
-                st.subheader("💡 Structural Optimization")
-                fixes = get_bioisosteres(mol)
-                if fixes:
-                    st.write("Suggested Bioisosteres to optimize potency/solubility:")
-                    for f in fixes: st.code(f)
-                else:
-                    st.write("No common lead-optimization swaps found.")
+            # TAB 1: PROPERTY ANALYTICS
+            with tab1:
+                col1, col2 = st.columns(2)
+                with col1:
+                    st.subheader("Physicochemical Profile")
+                    stats = {
+                        "Molecular Weight": round(Descriptors.MolWt(mol), 2),
+                        "LogP (Hydrophobicity)": round(Descriptors.MolLogP(mol), 2),
+                        "H-Bond Donors": Descriptors.NumHDonors(mol),
+                        "H-Bond Acceptors": Descriptors.NumHAcceptors(mol),
+                        "TPSA (Å²)": round(Descriptors.TPSA(mol), 2),
+                        "Rotatable Bonds": Descriptors.NumRotatableBonds(mol)
+                    }
+                    st.table(pd.DataFrame(stats.items(), columns=["Property", "Value"]))
+                    
+                    if stats["Molecular Weight"] <= 500 and stats["LogP (Hydrophobicity)"] <= 5:
+                        st.success("✅ Favorable Drug-Likeness (Lipinski)")
+                    else:
+                        st.warning("⚠️ Non-ideal pharmacokinetics predicted.")
 
-            with col2:
-                st.subheader("⚛️ 3D Electronic Mapping")
+                with col2:
+                    st.subheader("Structural Optimization Suggestions")
+                    fixes = get_bioisosteres(mol)
+                    if fixes:
+                        st.write("Consider these Bioisosteric Swaps to improve stability/potency:")
+                        for f in fixes: st.code(f)
+                    else:
+                        st.write("No common bioisosteric replacements found for this scaffold.")
+
+            # TAB 2: 3D HOTSPOT MAPPING
+            with tab2:
+                st.subheader("Electronic Potential Mapping")
+                st.write("Visualizing reactive sites via Gasteiger Partial Charges.")
                 AllChem.ComputeGasteigerCharges(mol)
                 mblock = Chem.MolToPDBBlock(mol)
-                view = py3Dmol.view(width=500, height=400)
+                view = py3Dmol.view(width=800, height=500)
                 view.addModel(mblock, 'pdb')
                 
                 for i, atom in enumerate(mol.GetAtoms()):
@@ -101,29 +111,32 @@ if smiles_input:
                     view.setStyle({'serial': i}, {'stick': {'color': color}, 'sphere': {'scale': 0.3, 'color': color}})
                 
                 view.zoomTo()
-                showmol(view, height=400, width=500)
-                st.caption("Visualizing Electrophilic (Blue) and Nucleophilic (Red) centers.")
+                showmol(view, height=500, width=800)
+                st.caption("🔴 Negative Charge (Nucleophilic) | 🔵 Positive Charge (Electrophilic) | ⚪ Neutral")
 
-            # 3. COORDINATE DATA & EXPORT
-            st.divider()
-            tab1, tab2 = st.tabs(["Coordinate Systems", "Energy Landscape (PES)"])
-
-            with tab1:
-                st.subheader("Geometry Data")
-                atom_data = [[a.GetSymbol(), i, pos.x, pos.y, pos.z] for i, (a, pos) in enumerate(zip(mol.GetAtoms(), [conf.GetAtomPosition(k) for k in range(mol.GetNumAtoms())]))]
-                df_coords = pd.DataFrame(atom_data, columns=["Symbol", "Atom_No", "X", "Y", "Z"])
+            # TAB 3: GEOMETRY & EXPORT
+            with tab3:
+                col_a, col_b = st.columns(2)
+                with col_a:
+                    st.subheader("Cartesian Coordinates (XYZ)")
+                    atom_data = [[a.GetSymbol(), i, pos.x, pos.y, pos.z] for i, (a, pos) in enumerate(zip(mol.GetAtoms(), [conf.GetAtomPosition(k) for k in range(mol.GetNumAtoms())]))]
+                    df_xyz = pd.DataFrame(atom_data, columns=["Atom", "ID", "X", "Y", "Z"])
+                    st.dataframe(df_xyz, use_container_width=True)
+                    csv = df_xyz.to_csv(index=False).encode('utf-8')
+                    st.download_button("📥 Download XYZ CSV", csv, "geometry.csv", "text/csv")
                 
-                st.dataframe(df_coords, use_container_width=True)
-                
-                # Export Button for Researchers
-                csv = df_coords.to_csv(index=False).encode('utf-8')
-                st.download_button("Download XYZ Coordinates as CSV", csv, "molecule_coords.csv", "text/csv")
+                with col_b:
+                    st.subheader("Internal Geometry (Bond Details)")
+                    b_list = [[mol.GetAtomWithIdx(b.GetBeginAtomIdx()).GetSymbol(), b.GetBeginAtomIdx(), mol.GetAtomWithIdx(b.GetEndAtomIdx()).GetSymbol(), b.GetEndAtomIdx(), round(rdMolTransforms.GetBondLength(conf, b.GetBeginAtomIdx(), b.GetEndAtomIdx()), 3)] for b in mol.GetBonds()]
+                    st.dataframe(pd.DataFrame(b_list, columns=["S1", "ID1", "S2", "ID2", "Length (Å)"]), use_container_width=True)
 
-            with tab2:
-                st.subheader("Potential Energy Surface")
+            # TAB 4: ENERGY LANDSCAPES
+            with tab4:
+                st.subheader("Potential Energy Surface (PES) Scan")
                 scan_matches = mol.GetSubstructMatches(Chem.MolFromSmarts('[!#1]~[!#1&!R]~[!#1&!R]~[!#1]'))
                 
                 if len(scan_matches) >= 2:
+                    st.info("Double Dihedral Scan: Visualizing molecular flexibility.")
                     d1, d2 = list(scan_matches[0]), list(scan_matches[1])
                     steps = np.arange(0, 380, 40)
                     Z = np.zeros((len(steps), len(steps)))
@@ -135,11 +148,11 @@ if smiles_input:
                             ff = AllChem.MMFFGetMoleculeForceField(mol, AllChem.MMFFGetMoleculeProperties(mol))
                             Z[i, j] = ff.CalcEnergy() if ff else 0
 
-                    fig = go.Figure(data=[go.Surface(z=Z, x=steps, y=steps, colorscale='Plasma')])
-                    fig.update_layout(scene=dict(xaxis_title='Dihedral 1', yaxis_title='Dihedral 2', zaxis_title='Energy (kcal/mol)'))
+                    fig = go.Figure(data=[go.Surface(z=Z, x=steps, y=steps, colorscale='Viridis')])
+                    fig.update_layout(scene=dict(xaxis_title='Twist 1', yaxis_title='Twist 2', zaxis_title='Energy (kcal/mol)'))
                     st.plotly_chart(fig, use_container_width=True)
                 else:
-                    st.info("The molecule is too rigid or small for a 3D PES Scan. Add a chain of at least 4 non-ring atoms.")
+                    st.warning("The molecule requires more rotatable bonds for a 3D Energy Surface Scan.")
 
         except Exception as e:
-            st.error(f"Platform Error: {e}. Try a different SMILES string.")
+            st.error(f"Computation Error: {e}")
