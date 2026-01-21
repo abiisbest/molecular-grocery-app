@@ -33,7 +33,7 @@ def generate_conformers(smiles, num_conf=10):
         if ff:
             ff.Minimize()
             energy = ff.CalcEnergy()
-            data.append({"ID": conf_id, "Energy": energy})
+            data.append({"ID": conf_id, "Energy (kcal/mol)": energy})
             
     return mol, data
 
@@ -48,7 +48,7 @@ if smiles_input:
     mol, energy_data = generate_conformers(smiles_input, num_conf)
     
     if mol and energy_data:
-        df = pd.DataFrame(energy_data).sort_values("Energy")
+        df = pd.DataFrame(energy_data).sort_values("Energy (kcal/mol)")
         
         col1, col2 = st.columns([1, 2])
         
@@ -56,7 +56,25 @@ if smiles_input:
             st.subheader("Conformational Energy")
             st.dataframe(df)
             
+            csv = df.to_csv(index=False).encode('utf-8')
+            st.download_button(
+                label="Download Energy Data as CSV",
+                data=csv,
+                file_name="conformational_energies.csv",
+                mime="text/csv"
+            )
+            
+            st.divider()
+            
             selected_id = st.selectbox("Select Conformer ID for 3D View", df["ID"])
+            
+            pdb_block = Chem.MolToPDBBlock(mol, confId=int(selected_id))
+            st.download_button(
+                label="Download Selected Conformer (PDB)",
+                data=pdb_block,
+                file_name=f"conformer_{selected_id}.pdb",
+                mime="chemical/x-pdb"
+            )
             
             st.subheader("Pharmacophore Legend")
             st.write("🔵 **Donor**")
