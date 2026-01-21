@@ -6,21 +6,24 @@ from stmol import showmol
 import pandas as pd
 import os
 
-st.set_page_config(page_title="Molecular Platform", layout="wide")
+st.set_page_config(page_title="Molecular Analysis Platform", layout="wide")
 
 def get_pharmacophores(mol):
     fdef_file = os.path.join(RDConfig.RDDataDir, 'BaseFeatures.fdef')
     factory = ChemicalFeatures.BuildFeatureFactory(fdef_file)
     return factory.GetFeaturesForMol(mol)
 
-def generate_conformers(smiles, num_conf=10):
+def generate_conformers(smiles, num_conf):
     mol = Chem.MolFromSmiles(smiles)
     if not mol:
         return None, None
     
     mol = Chem.AddHs(mol)
+    
     params = AllChem.ETKDGv3()
     params.randomSeed = 42
+    # Ensures conformers are physically distinct by 0.5 Angstrom RMSD
+    params.pruneRmsThresh = 0.5 
     
     ids = AllChem.EmbedMultipleConfs(mol, numConfs=num_conf, params=params)
     
@@ -40,11 +43,12 @@ def generate_conformers(smiles, num_conf=10):
 st.title("Integrated Computational Platform for Molecular Property Prediction")
 st.markdown("### Conformational Energy Analysis & Pharmacophore Mapping")
 
-smiles_input = st.text_input("Enter 2D SMILES:", "c1ccccc1C(=O)O")
+# Default SMILES: Atorvastatin (Lipitor)
+smiles_input = st.text_input("Enter 2D SMILES:", "CC(C)c1c(c(c(n1CC[C@H](C[C@H](CC(=O)O)O)O)c2ccc(cc2)F)c3ccccc3)C(=O)Nc4ccccc4")
+
+num_conf = st.sidebar.slider("Number of Conformers to Generate", 1, 50, 10)
 
 if smiles_input:
-    num_conf = st.sidebar.slider("Number of Conformers", 1, 50, 10)
-    
     mol, energy_data = generate_conformers(smiles_input, num_conf)
     
     if mol and energy_data:
@@ -53,12 +57,13 @@ if smiles_input:
         col1, col2 = st.columns([1, 2])
         
         with col1:
-            st.subheader("Conformational Energy")
+            st.subheader(f"Results for {len(df)} Unique Conformers")
             st.dataframe(df)
             
+            # CSV Download
             csv = df.to_csv(index=False).encode('utf-8')
             st.download_button(
-                label="Download Energy Data as CSV",
+                label="Download Energy Data (CSV)",
                 data=csv,
                 file_name="conformational_energies.csv",
                 mime="text/csv"
@@ -66,8 +71,9 @@ if smiles_input:
             
             st.divider()
             
-            selected_id = st.selectbox("Select Conformer ID for 3D View", df["ID"])
+            selected_id = st.selectbox("Select ID for 3D View", df["ID"])
             
+            # PDB Download
             pdb_block = Chem.MolToPDBBlock(mol, confId=int(selected_id))
             st.download_button(
                 label="Download Selected Conformer (PDB)",
@@ -91,6 +97,7 @@ if smiles_input:
             view.addModel(mb, 'mol')
             view.setStyle({'stick': {'radius': 0.15}, 'sphere': {'scale': 0.25}})
             
+            # Add Pharmacophore spheres
             for f in feats:
                 pos = f.GetPos()
                 fam = f.GetFamily()
@@ -105,4 +112,4 @@ if smiles_input:
             view.zoomTo()
             showmol(view, height=500, width=800)
     else:
-        st.error("Error processing SMILES or generating conformers.")
+        st.error("Error processing SMILES. Please check structure validity.")
