@@ -53,7 +53,7 @@ def generate_conformers(mol, num_conf):
         ff = AllChem.MMFFGetMoleculeForceField(mol, mmff_props, confId=conf_id)
         if ff:
             ff.Minimize(maxIts=1000)
-            energy = ff.CalcEnergy()
+            energy = ff.CalcEnergy() # Units are kcal/mol
             raw_data.append({"ID": conf_id, "Raw": energy})
     
     if not raw_data: return None, None
@@ -67,6 +67,7 @@ def generate_conformers(mol, num_conf):
         rmsd = AllChem.GetConformerRMS(mol, best_id, d["ID"])
         energy_list.append({
             "ID": int(d["ID"]), 
+            "Energy (kcal/mol)": round(d["Raw"], 4),
             "Stability Score": round(-rel_e, 4), 
             "RMSD (Å)": round(rmsd, 3)
         })
@@ -77,7 +78,7 @@ st.title("Integrated Computational Platform for Molecular Property Prediction")
 tab1, tab2 = st.tabs(["Single Molecule Analysis", "Batch Processing"])
 
 with tab1:
-    smiles_input = st.text_input("Enter SMILES:", "CC(C)c1c(c(c(n1CC[C@H](C[C@H](CC(=O)O)O)O)c2ccc(cc2)F)c3ccccc3)C(=O)Nc4ccccc4")
+    smiles_input = st.text_input("Enter 2D SMILES:", "CC(C)c1c(c(c(n1CC[C@H](C[C@H](CC(=O)O)O)O)c2ccc(cc2)F)c3ccccc3)C(=O)Nc4ccccc4")
     num_conf = st.slider("Conformers to Generate", 1, 50, 10, key="single_slider")
     
     if smiles_input:
@@ -91,15 +92,15 @@ with tab1:
             c1.metric("MW", props["MW"])
             c2.metric("LogP", props["LogP"])
             c3.metric("TPSA", props["TPSA"])
-            c4.metric("PAINS", props["PAINS"])
+            c4.metric("PAINS Filter", props["PAINS"])
             
             if energy_data:
                 df = pd.DataFrame(energy_data).sort_values("Stability Score", ascending=False)
                 col_left, col_right = st.columns([1, 2])
                 
                 with col_left:
-                    st.subheader("Conformer Stability & RMSD")
-                    st.write("RMSD is relative to the highest Stability Score (0.00).")
+                    st.subheader("Conformer Stability")
+                    st.write("Energy is in absolute kcal/mol.")
                     st.dataframe(df, use_container_width=True)
                     
                     sel_id = st.selectbox("Select ID for 3D View", df["ID"].tolist())
