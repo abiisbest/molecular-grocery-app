@@ -53,7 +53,7 @@ def generate_conformers(mol, num_conf):
         ff = AllChem.MMFFGetMoleculeForceField(mol, mmff_props, confId=conf_id)
         if ff:
             ff.Minimize(maxIts=1000)
-            energy = ff.CalcEnergy() # Units are kcal/mol
+            energy = ff.CalcEnergy() 
             raw_data.append({"ID": conf_id, "Raw": energy})
     
     if not raw_data: return None, None
@@ -78,7 +78,7 @@ st.title("Integrated Computational Platform for Molecular Property Prediction")
 tab1, tab2 = st.tabs(["Single Molecule Analysis", "Batch Processing"])
 
 with tab1:
-    smiles_input = st.text_input("Enter 2D SMILES:", "CC(C)c1c(c(c(n1CC[C@H](C[C@H](CC(=O)O)O)O)c2ccc(cc2)F)c3ccccc3)C(=O)Nc4ccccc4")
+    smiles_input = st.text_input("Enter SMILES:", "CC(C)c1c(c(c(n1CC[C@H](C[C@H](CC(=O)O)O)O)c2ccc(cc2)F)c3ccccc3)C(=O)Nc4ccccc4")
     num_conf = st.slider("Conformers to Generate", 1, 50, 10, key="single_slider")
     
     if smiles_input:
@@ -100,14 +100,16 @@ with tab1:
                 
                 with col_left:
                     st.subheader("Conformer Stability")
-                    st.write("Energy is in absolute kcal/mol.")
                     st.dataframe(df, use_container_width=True)
-                    
                     sel_id = st.selectbox("Select ID for 3D View", df["ID"].tolist())
                     
                     if sel_id is not None:
                         pdb_data = Chem.MolToPDBBlock(mol_ready, confId=int(sel_id))
                         st.download_button("Download PDB", pdb_data, f"conf_{sel_id}.pdb")
+                        
+                    # Animation Control
+                    st.divider()
+                    animate = st.checkbox("Toggle Auto-Rotation (Animation)")
                 
                 with col_right:
                     st.subheader(f"3D Visualizer (ID: {sel_id})")
@@ -119,9 +121,13 @@ with tab1:
                         p = f.GetPos(int(sel_id))
                         col = "blue" if f.GetFamily()=="Donor" else "red" if f.GetFamily()=="Acceptor" else "orange"
                         view.addSphere({'center':{'x':p.x,'y':p.y,'z':p.z}, 'radius':0.7, 'color':col, 'opacity':0.5})
+                    
+                    if animate:
+                        view.spin(True)
+                    
                     view.zoomTo()
                     showmol(view, height=500, width=800)
-                    st.write("🔵 **Donor** | 🔴 **Acceptor** | 🟠 **Aromatic**")
+                    st.info("To save as video: Use a screen recorder while 'Auto-Rotation' is enabled.")
 
 with tab2:
     st.subheader("High-Throughput Batch Screening")
