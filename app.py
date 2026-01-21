@@ -6,51 +6,85 @@ from stmol import showmol
 import pandas as pd
 import os
 
-st.set_page_config(page_title="Molecular Analysis Platform", layout="wide")
+st.set_page_config(page_title="Molecular Platform", layout="wide")
 
 def get_pharmacophores(mol):
     fdef_file = os.path.join(RDConfig.RDDataDir, 'BaseFeatures.fdef')
     factory = ChemicalFeatures.BuildFeatureFactory(fdef_file)
     return factory.GetFeaturesForMol(mol)
 
-def generate_conformers(smiles, num_conf):
+def generate_conformers(smiles, num_conf=10):
     mol = Chem.MolFromSmiles(smiles)
-    if not mol: return None, None
+    if not mol:
+        return None, None
+    
     mol = Chem.AddHs(mol)
-    AllChem.EmbedMultipleConfs(mol, num_confs=num_conf, params=AllChem.ETKDG())
-    energies = []
-    for conf in mol.GetConformers():
-        ff = AllChem.UFFGetMoleculeForceField(mol, confId=conf.GetId())
-        if ff:
-            energies.append(ff.CalcEnergy())
-        else:
-            energies.append(float('nan'))
-    return mol, energies
+    params = AllChem.ETKDGv3()
+    params.randomSeed = 42
+    
+    ids = AllChem.EmbedMultipleConfs(mol, numConfs=num_conf, params=params)
+    
+    if not ids:
+        return None, None
 
-st.title("Molecular Property & Conformational Analysis")
-smiles_input = st.text_input("SMILES", "CC(=O)OC1=CC=CC=C1C(=O)O")
+    data = []
+    for conf_id in ids:
+        ff = AllChem.UFFGetMoleculeForceField(mol, confId=conf_id)
+        if ff:
+            ff.Minimize()
+            energy = ff.CalcEnergy()
+            data.append({"ID": conf_id, "Energy": energy})
+            
+    return mol, data
+
+st.title("Integrated Computational Platform for Molecular Property Prediction")
+st.markdown("### Conformational Energy Analysis & Pharmacophore Mapping")
+
+smiles_input = st.text_input("Enter 2D SMILES:", "c1ccccc1C(=O)O")
 
 if smiles_input:
-    mol, energies = generate_conformers(smiles_input, 10)
-    if mol:
+    num_conf = st.sidebar.slider("Number of Conformers", 1, 50, 10)
+    
+    mol, energy_data = generate_conformers(smiles_input, num_conf)
+    
+    if mol and energy_data:
+        df = pd.DataFrame(energy_data).sort_values("Energy")
+        
         col1, col2 = st.columns([1, 2])
-        df = pd.DataFrame({"ID": range(len(energies)), "Energy": energies}).dropna().sort_values("Energy")
         
         with col1:
+            st.subheader("Conformational Energy")
             st.dataframe(df)
-            selected = st.selectbox("Select Conformer ID", df["ID"])
+            
+            selected_id = st.selectbox("Select Conformer ID for 3D View", df["ID"])
+            
+            st.subheader("Pharmacophore Legend")
+            st.write("🔵 **Donor**")
+            st.write("🔴 **Acceptor**")
+            st.write("🟠 **Aromatic / Hydrophobe**")
             
         with col2:
+            st.subheader(f"3D Visualization (Conformer {selected_id})")
+            
             feats = get_pharmacophores(mol)
+            
             view = py3Dmol.view(width=800, height=500)
-            view.addModel(Chem.MolToMolBlock(mol, confId=int(selected)), 'mol')
-            view.setStyle({'stick': {}, 'sphere': {'scale': 0.3}})
+            mb = Chem.MolToMolBlock(mol, confId=int(selected_id))
+            view.addModel(mb, 'mol')
+            view.setStyle({'stick': {'radius': 0.15}, 'sphere': {'scale': 0.25}})
             
             for f in feats:
-                p = f.GetPos()
+                pos = f.GetPos()
                 fam = f.GetFamily()
                 color = "blue" if fam == "Donor" else "red" if fam == "Acceptor" else "orange"
-                view.addSphere({'center':{'x':p.x,'y':p.y,'z':p.z}, 'radius':0.7, 'color':color, 'opacity':0.6})
+                view.addSphere({
+                    'center': {'x': pos.x, 'y': pos.y, 'z': pos.z},
+                    'radius': 0.8,
+                    'color': color,
+                    'opacity': 0.5
+                })
             
             view.zoomTo()
             showmol(view, height=500, width=800)
+    else:
+        st.error("Error processing SMILES or generating conformers.")
