@@ -58,7 +58,7 @@ def generate_conformers(mol, num_conf):
     
     energy_list = []
     for d in raw_data:
-        # We calculate "Stability Score" to give you the negative/relative values you need
+        # Relative Stability Score for lower/negative value representation
         rel_e = d["Raw"] - min_e
         rmsd = AllChem.GetConformerRMS(mol, best_id, d["ID"])
         energy_list.append({
@@ -71,10 +71,10 @@ def generate_conformers(mol, num_conf):
 
 st.title("Integrated Computational Platform for Molecular Property Prediction")
 
-tab1, tab2 = st.tabs(["Single Molecule Analysis", "Batch Processing"])
+tab1, tab2 = st.tabs(["Single Molecule Analysis", "Batch Screening"])
 
 with tab1:
-    smiles_input = st.text_input("Enter SMILES:", "CC(C)c1c(c(c(n1CC[C@H](C[C@H](CC(=O)O)O)O)c2ccc(cc2)F)c3ccccc3)C(=O)Nc4ccccc4")
+    smiles_input = st.text_input("Enter 2D SMILES:", "CC(C)c1c(c(c(n1CC[C@H](C[C@H](CC(=O)O)O)O)c2ccc(cc2)F)c3ccccc3)C(=O)Nc4ccccc4")
     num_conf = st.slider("Conformers to Generate", 1, 50, 10, key="single_slider")
     
     if smiles_input:
@@ -85,11 +85,8 @@ with tab1:
             
             st.subheader("Molecular Properties")
             c1, c2, c3, c4, c5 = st.columns(5)
-            c1.metric("MW", props["MW"])
-            c2.metric("LogP", props["LogP"])
-            c3.metric("TPSA", props["TPSA"])
-            c4.metric("PAINS", props["PAINS"])
-            c5.metric("Violations", props["RO5 Violations"])
+            c1.metric("MW", props["MW"]); c2.metric("LogP", props["LogP"]); c3.metric("TPSA", props["TPSA"])
+            c4.metric("PAINS", props["PAINS"]); c5.metric("RO5", props["RO5 Violations"])
             
             if energy_data:
                 df = pd.DataFrame(energy_data).sort_values("ID")
@@ -97,41 +94,33 @@ with tab1:
                 
                 with col_left:
                     st.subheader("Conformer Stability")
-                    # Stability Score (Rel) will show you the 0.00 and negative values
                     st.dataframe(df[["ID", "Stability Score (Rel)", "RMSD (Å)"]], use_container_width=True)
                     
                     st.divider()
-                    mode = st.radio("View Mode", ["Static Selection", "Molecular Movement Animation"])
-                    
-                    if mode == "Static Selection":
-                        sel_id = st.selectbox("Select ID", df["ID"].tolist())
-                    else:
-                        sel_id = 0 
+                    mode = st.radio("Display Mode", ["Static View", "Transition Animation (Fast)"])
+                    sel_id = st.selectbox("Select ID for PDB", df["ID"].tolist()) if mode == "Static View" else 0
                     
                     pdb_data = Chem.MolToPDBBlock(mol_ready, confId=int(sel_id))
                     st.download_button("Download PDB", pdb_data, f"conf_{sel_id}.pdb")
 
                 with col_right:
-                    st.subheader("3D Visualizer")
+                    st.subheader("3D Transition Visualizer")
                     view = py3Dmol.view(width=800, height=500)
                     
-                    if mode == "Molecular Movement Animation":
-                        # Load all conformers at once to show the "ensemble" movement
+                    if mode == "Transition Animation (Fast)":
+                        # Add all conformers to one view for high-speed transition
                         for cid in df["ID"].tolist():
-                            mb = Chem.MolToMolBlock(mol_ready, confId=int(cid))
-                            view.addModel(mb, 'mol')
-                        
+                            view.addModel(Chem.MolToMolBlock(mol_ready, confId=int(cid)), 'mol')
                         view.setStyle({'stick': {'radius': 0.15}})
-                        # High speed interval (150ms) to show movement/vibration
+                        # Speed set to 150ms for smooth 'vibrating' transition
                         view.animate({'loop': 'forward', 'interval': 150})
                     else:
-                        mb = Chem.MolToMolBlock(mol_ready, confId=int(sel_id))
-                        view.addModel(mb, 'mol')
+                        view.addModel(Chem.MolToMolBlock(mol_ready, confId=int(sel_id)), 'mol')
                         view.setStyle({'stick': {'radius': 0.15}, 'sphere': {'scale': 0.25}})
                     
                     view.zoomTo()
                     showmol(view, height=500, width=800)
-                    st.info("Switch to 'Molecular Movement Animation' to see the high-speed conformer transitions.")
+                    st.info("Enable 'Transition Animation' and screen-record for your presentation video.")
 
 with tab2:
     st.subheader("High-Throughput Batch Screening")
