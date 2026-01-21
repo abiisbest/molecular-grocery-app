@@ -4,7 +4,6 @@ from rdkit.Chem import AllChem, RDConfig, ChemicalFeatures, Descriptors, Lipinsk
 import py3Dmol
 from stmol import showmol
 import pandas as pd
-import plotly.graph_objects as go
 import os
 
 st.set_page_config(page_title="Bioinformatics Analysis Platform", layout="wide")
@@ -23,7 +22,6 @@ def calculate_properties(mol):
         "TPSA": round(Descriptors.TPSA(mol), 2),
         "RotB": Lipinski.NumRotatableBonds(mol)
     }
-    # Check Lipinski Rule of Five Violations
     violations = 0
     if properties["MW"] > 500: violations += 1
     if properties["LogP"] > 5: violations += 1
@@ -31,21 +29,6 @@ def calculate_properties(mol):
     if properties["HBA"] > 10: violations += 1
     properties["Violations"] = violations
     return properties
-
-def plot_radar(props):
-    categories = ['MW', 'LogP', 'HBD', 'HBA', 'RotB']
-    # Normalizing values for visualization against standard thresholds
-    values = [
-        min(props["MW"]/500, 1.5), 
-        min(props["LogP"]/5, 1.5),
-        min(props["HBD"]/5, 1.5),
-        min(props["HBA"]/10, 1.5),
-        min(props["RotB"]/10, 1.5)
-    ]
-    fig = go.Figure()
-    fig.add_trace(go.Scatterpolar(r=values, theta=categories, fill='toself', name='Molecule Profile', line_color='teal'))
-    fig.update_layout(polar=dict(radialaxis=dict(visible=True, range=[0, 1.5])), showlegend=False, height=350)
-    return fig
 
 def generate_conformers(smiles, num_conf):
     mol = Chem.MolFromSmiles(smiles)
@@ -94,22 +77,14 @@ if smiles_input:
     
     if mol and mol_props:
         st.subheader("Predicted Molecular Properties")
-        m_col1, m_col2 = st.columns([1, 1])
-        
-        with m_col1:
-            # Metrics for Lipinski's Rule of Five
-            met_cols = st.columns(3)
-            met_cols[0].metric("MW", mol_props["MW"])
-            met_cols[1].metric("LogP", mol_props["LogP"])
-            met_cols[2].metric("TPSA", mol_props["TPSA"])
-            
-            met_cols2 = st.columns(3)
-            met_cols2[0].metric("HBD", mol_props["HBD"])
-            met_cols2[1].metric("HBA", mol_props["HBA"])
-            met_cols2[2].metric("Violations", mol_props["Violations"])
-        
-        with m_col2:
-            st.plotly_chart(plot_radar(mol_props), use_container_width=True)
+        met_cols = st.columns(7)
+        met_cols[0].metric("MW", mol_props["MW"])
+        met_cols[1].metric("LogP", mol_props["LogP"])
+        met_cols[2].metric("TPSA", mol_props["TPSA"])
+        met_cols[3].metric("HBD", mol_props["HBD"])
+        met_cols[4].metric("HBA", mol_props["HBA"])
+        met_cols[5].metric("RotB", mol_props["RotB"])
+        met_cols[6].metric("Violations", mol_props["Violations"])
 
         if energy_data:
             df = pd.DataFrame(energy_data).sort_values("Rel Energy")
@@ -118,12 +93,13 @@ if smiles_input:
             with col1:
                 st.subheader("Stability Analysis")
                 st.dataframe(df[["ID", "Stability Score"]], use_container_width=True)
-                st.download_button("Download CSV", df.to_csv(index=False).encode('utf-8'), "data.csv", "text/csv")
+                st.download_button("Download CSV", df.to_csv(index=False).encode('utf-8'), "molecular_data.csv", "text/csv")
                 
                 st.divider()
                 selected_id = st.selectbox("Select Conformer ID", df["ID"])
                 st.download_button("Download PDB", Chem.MolToPDBBlock(mol, confId=int(selected_id)), f"conf_{selected_id}.pdb", "chemical/x-pdb")
                 
+                st.markdown("#### Legend")
                 st.write("🔵 **Donor** | 🔴 **Acceptor** | 🟠 **Aromatic**")
                 
             with col2:
@@ -132,10 +108,12 @@ if smiles_input:
                 view = py3Dmol.view(width=800, height=500)
                 view.addModel(Chem.MolToMolBlock(mol, confId=int(selected_id)), 'mol')
                 view.setStyle({'stick': {'radius': 0.15}, 'sphere': {'scale': 0.25}})
+                
                 for f in feats:
                     p = f.GetPos(int(selected_id)) 
                     c = "blue" if f.GetFamily()=="Donor" else "red" if f.GetFamily()=="Acceptor" else "orange"
                     view.addSphere({'center':{'x':p.x,'y':p.y,'z':p.z}, 'radius':0.7, 'color':c, 'opacity':0.5})
+                
                 view.zoomTo()
                 showmol(view, height=500, width=800)
     else:
