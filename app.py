@@ -19,6 +19,10 @@ def generate_conformers(smiles, num_conf):
         return None, None
     
     mol = Chem.AddHs(mol)
+    
+    # Calculate Gasteiger Charges to stabilize electrostatics and lower energy
+    AllChem.ComputeGasteigerCharges(mol)
+    
     params = AllChem.ETKDGv3()
     params.randomSeed = 42
     params.pruneRmsThresh = 0.5 
@@ -29,10 +33,11 @@ def generate_conformers(smiles, num_conf):
 
     data = []
     for conf_id in ids:
+        # MMFF94 provides better localized energy for drug-like molecules
         prop = AllChem.MMFFGetMoleculeProperties(mol)
         ff = AllChem.MMFFGetMoleculeForceField(mol, prop, confId=conf_id)
         if ff:
-            ff.Minimize()
+            ff.Minimize(maxIts=500) # Increased iterations for better convergence
             energy = ff.CalcEnergy()
             data.append({"ID": conf_id, "Energy (kcal/mol)": round(energy, 4)})
             
@@ -58,24 +63,13 @@ if smiles_input:
             st.dataframe(df)
             
             csv = df.to_csv(index=False).encode('utf-8')
-            st.download_button(
-                label="Download Energy Data (CSV)",
-                data=csv,
-                file_name="conformational_energies.csv",
-                mime="text/csv"
-            )
+            st.download_button("Download Energy Data (CSV)", csv, "energies.csv", "text/csv")
             
             st.divider()
-            
             selected_id = st.selectbox("Select ID for 3D View", df["ID"])
             
             pdb_block = Chem.MolToPDBBlock(mol, confId=int(selected_id))
-            st.download_button(
-                label="Download Selected Conformer (PDB)",
-                data=pdb_block,
-                file_name=f"conformer_{selected_id}.pdb",
-                mime="chemical/x-pdb"
-            )
+            st.download_button("Download Selected Conformer (PDB)", pdb_block, f"conf_{selected_id}.pdb", "chemical/x-pdb")
             
             st.subheader("Pharmacophore Legend")
             st.write("🔵 **Donor**")
@@ -85,9 +79,7 @@ if smiles_input:
         with col2:
             st.subheader(f"3D Visualization (Conformer {selected_id})")
             
-            # Aligns spheres specifically to the selected conformer coordinates
             feats = get_pharmacophores(mol, selected_id)
-            
             view = py3Dmol.view(width=800, height=500)
             mb = Chem.MolToMolBlock(mol, confId=int(selected_id))
             view.addModel(mb, 'mol')
