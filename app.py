@@ -61,7 +61,6 @@ if smiles_input:
         col1, col2 = st.columns([1, 2])
         with col1:
             st.subheader("Stability Ranking")
-            st.write("Energy relative to the most stable conformer (0.00).")
             st.dataframe(df)
             
             csv = df.to_csv(index=False).encode('utf-8')
