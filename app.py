@@ -4,7 +4,6 @@ from rdkit.Chem import AllChem, RDConfig, ChemicalFeatures, Descriptors, Lipinsk
 import py3Dmol
 from stmol import showmol
 import pandas as pd
-import time
 import os
 
 st.set_page_config(page_title="Bioinformatics Analysis Platform", layout="wide")
@@ -14,11 +13,6 @@ def check_pains(mol):
     params.AddCatalog(FilterCatalog.FilterCatalogParams.FilterCatalogs.PAINS)
     catalog = FilterCatalog.FilterCatalog(params)
     return "Detected" if catalog.HasMatch(mol) else "Clean"
-
-def get_pharmacophores(mol, conf_id):
-    fdef_file = os.path.join(RDConfig.RDDataDir, 'BaseFeatures.fdef')
-    factory = ChemicalFeatures.BuildFeatureFactory(fdef_file)
-    return factory.GetFeaturesForMol(mol, confId=int(conf_id))
 
 def calculate_properties(mol):
     properties = {
@@ -89,14 +83,15 @@ with tab1:
             energy_data, mol_ready = generate_conformers(mol_base, num_conf)
             
             st.subheader("Molecular Properties")
-            c1, c2, c3, c4 = st.columns(4)
+            c1, c2, c3, c4, c5 = st.columns(5)
             c1.metric("MW", props["MW"])
             c2.metric("LogP", props["LogP"])
             c3.metric("TPSA", props["TPSA"])
-            c4.metric("PAINS Filter", props["PAINS"])
+            c4.metric("PAINS", props["PAINS"])
+            c5.metric("RO5 Violations", props["RO5 Violations"])
             
             if energy_data:
-                df = pd.DataFrame(energy_data).sort_values("ID") # Sort by ID for sequential transition
+                df = pd.DataFrame(energy_data).sort_values("ID")
                 col_left, col_right = st.columns([1, 2])
                 
                 with col_left:
@@ -104,55 +99,38 @@ with tab1:
                     st.dataframe(df, use_container_width=True)
                     
                     st.divider()
-                    play_slideshow = st.button("▶ Start Conformer Slideshow (0-9)")
-                    stop_slideshow = st.button("⏹ Stop")
+                    mode = st.radio("View Mode", ["Static Selection", "Fast Movement Animation"])
                     
-                    # Manage manual selection if slideshow is off
-                    if 'current_idx' not in st.session_state:
-                        st.session_state.current_idx = 0
-                    
-                    sel_id = st.selectbox("Select ID for 3D View", df["ID"].tolist(), index=st.session_state.current_idx)
+                    if mode == "Static Selection":
+                        sel_id = st.selectbox("Select ID", df["ID"].tolist())
+                    else:
+                        st.info("Animating all conformers to show molecular flexibility.")
+                        sel_id = 0 # Default starting point
                     
                     pdb_data = Chem.MolToPDBBlock(mol_ready, confId=int(sel_id))
-                    st.download_button("Download PDB", pdb_data, f"conf_{sel_id}.pdb")
+                    st.download_button("Download Selected PDB", pdb_data, f"conf_{sel_id}.pdb")
 
                 with col_right:
-                    st.subheader(f"3D Visualizer (ID: {sel_id})")
+                    st.subheader("3D Visualizer")
+                    view = py3Dmol.view(width=800, height=500)
                     
-                    # Slideshow Logic
-                    if play_slideshow:
-                        for i in range(len(df)):
-                            st.session_state.current_idx = i
-                            current_id = df.iloc[i]["ID"]
-                            
-                            # Update Visualizer
-                            feats = get_pharmacophores(mol_ready, current_id)
-                            view = py3Dmol.view(width=800, height=500)
-                            view.addModel(Chem.MolToMolBlock(mol_ready, confId=int(current_id)), 'mol')
-                            view.setStyle({'stick': {'radius': 0.15}, 'sphere': {'scale': 0.25}})
-                            for f in feats:
-                                p = f.GetPos(int(current_id))
-                                col = "blue" if f.GetFamily()=="Donor" else "red" if f.GetFamily()=="Acceptor" else "orange"
-                                view.addSphere({'center':{'x':p.x,'y':p.y,'z':p.z}, 'radius':0.7, 'color':col, 'opacity':0.5})
-                            view.zoomTo()
-                            showmol(view, height=500, width=800)
-                            time.sleep(1) # Interval for video capture
-                            st.rerun()
-
-                    # Static View Logic (if slideshow not active)
+                    if mode == "Fast Movement Animation":
+                        # Load all conformers into one model to enable fast animation
+                        for cid in df["ID"].tolist():
+                            mb = Chem.MolToMolBlock(mol_ready, confId=int(cid))
+                            view.addModel(mb, 'mol')
+                        
+                        view.setStyle({'stick': {'radius': 0.15}})
+                        # Fast interval (200ms) to show movement
+                        view.animate({'loop': 'forward', 'interval': 200})
                     else:
-                        feats = get_pharmacophores(mol_ready, sel_id)
-                        view = py3Dmol.view(width=800, height=500)
-                        view.addModel(Chem.MolToMolBlock(mol_ready, confId=int(sel_id)), 'mol')
+                        mb = Chem.MolToMolBlock(mol_ready, confId=int(sel_id))
+                        view.addModel(mb, 'mol')
                         view.setStyle({'stick': {'radius': 0.15}, 'sphere': {'scale': 0.25}})
-                        for f in feats:
-                            p = f.GetPos(int(sel_id))
-                            col = "blue" if f.GetFamily()=="Donor" else "red" if f.GetFamily()=="Acceptor" else "orange"
-                            view.addSphere({'center':{'x':p.x,'y':p.y,'z':p.z}, 'radius':0.7, 'color':col, 'opacity':0.5})
-                        view.zoomTo()
-                        showmol(view, height=500, width=800)
-
-                    st.write("🔵 **Donor** | 🔴 **Acceptor** | 🟠 **Aromatic**")
+                    
+                    view.zoomTo()
+                    showmol(view, height=500, width=800)
+                    st.caption("Use 'Fast Movement Animation' to see conformer transitions for your video.")
 
 with tab2:
     st.subheader("High-Throughput Batch Screening")
@@ -169,4 +147,4 @@ with tab2:
                     results.append(p)
             res_df = pd.DataFrame(results)
             st.dataframe(res_df, use_container_width=True)
-            st.download_button("Download Batch Results (CSV)", res_df.to_csv(index=False).encode('utf-8'), "batch_results.csv")
+            st.download_button("Download Results (CSV)", res_df.to_csv(index=False).encode('utf-8'), "batch_results.csv")
