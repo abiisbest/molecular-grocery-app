@@ -4,37 +4,44 @@ from rdkit.Chem import AllChem, RDConfig, ChemicalFeatures, Descriptors, Lipinsk
 import py3Dmol
 from stmol import showmol
 import pandas as pd
+import numpy as np
 import os
 
 st.set_page_config(page_title="Bioinformatics Analysis Platform", layout="wide")
 
-def get_pharmacophores(mol, conf_id):
-    fdef_file = os.path.join(RDConfig.RDDataDir, 'BaseFeatures.fdef')
-    factory = ChemicalFeatures.BuildFeatureFactory(fdef_file)
-    return factory.GetFeaturesForMol(mol, confId=int(conf_id))
-
-def calculate_electronic_properties(mol):
-    # Mimicking MOPAC-style electronic outputs using semi-empirical proxies
-    AllChem.ComputeGasteigerCharges(mol) # Mimics semi-empirical charge distribution
+def calculate_cns_mpo(props):
+    # Simplified CNS-MPO Score
+    def f(val, low, high):
+        if val <= low: return 1.0
+        if val >= high: return 0.0
+        return (high - val) / (high - low)
     
-    properties = {
+    # Components for CNS-MPO
+    s_logp = f(props["LogP"], 3, 5)
+    s_mw = f(props["MW"], 360, 500)
+    s_tpsa = f(props["TPSA"], 40, 90) if props["TPSA"] > 40 else f(20 - props["TPSA"], 0, 20)
+    s_hbd = f(props["HBD"], 0, 3)
+    
+    return round(s_logp + s_mw + s_tpsa + s_hbd, 2)
+
+def calculate_complex_properties(mol):
+    AllChem.ComputeGasteigerCharges(mol)
+    props = {
         "MW": round(Descriptors.MolWt(mol), 2),
         "LogP": round(Descriptors.MolLogP(mol), 2),
         "TPSA": round(Descriptors.TPSA(mol), 2),
-        "Molar Refractivity": round(Descriptors.MolMR(mol), 2), # Electronic polarizability
-        "Labute ASA": round(Descriptors.LabuteASA(mol), 2), # Electronic surface area
         "HBD": Lipinski.NumHDonors(mol),
         "HBA": Lipinski.NumHAcceptors(mol),
         "RotB": Lipinski.NumRotatableBonds(mol),
         "Fsp3": round(Descriptors.FractionCSP3(mol), 3),
+        "MolRefractivity": round(Descriptors.MolMR(mol), 2),
     }
     
-    # Calculate Charge statistics as a MOPAC proxy
-    charges = [float(mol.GetAtomWithIdx(i).GetProp('_GasteigerCharge')) for i in range(mol.GetNumAtoms())]
-    properties["Max Partial Charge"] = round(max(charges), 4)
-    properties["Min Partial Charge"] = round(min(charges), 4)
+    # Custom Indices
+    props["CNS-MPO"] = calculate_cns_mpo(props)
+    props["Drug-Likeness"] = "High" if (props["MW"] < 500 and props["LogP"] < 5) else "Low"
     
-    return properties
+    return props
 
 def generate_conformers(mol, num_conf):
     mol = Chem.AddHs(mol)
@@ -76,44 +83,50 @@ tab1, tab2 = st.tabs(["Single Molecule Analysis", "Batch Screening"])
 
 with tab1:
     smiles_input = st.text_input("Enter SMILES:", "CC(C)c1c(c(c(n1CC[C@H](C[C@H](CC(=O)O)O)O)c2ccc(cc2)F)c3ccccc3)C(=O)Nc4ccccc4")
-    num_conf = st.slider("Conformers to Generate", 1, 50, 10)
+    num_conf = st.slider("Conformers", 1, 50, 10)
     
     if smiles_input:
         mol_base = Chem.MolFromSmiles(smiles_input)
         if mol_base:
-            props = calculate_electronic_properties(mol_base)
+            props = calculate_complex_properties(mol_base)
             energy_data, mol_ready = generate_conformers(mol_base, num_conf)
             
-            st.subheader("Molecular & Quantum Descriptors (MOPAC Proxies)")
-            c1, c2, c3, c4, c5 = st.columns(5)
-            c1.metric("Mol Refractivity", props["Molar Refractivity"])
-            c2.metric("Labute ASA", props["Labute ASA"])
-            c3.metric("Max Charge", props["Max Partial Charge"])
-            c4.metric("Min Charge", props["Min Partial Charge"])
-            c5.metric("TPSA", props["TPSA"])
+            st.subheader("Advanced Bio-Descriptors")
+            c1, c2, c3, c4 = st.columns(4)
+            c1.metric("CNS-MPO Score", props["CNS-MPO"])
+            c2.metric("Molar Refractivity", props["MolRefractivity"])
+            c3.metric("Fsp3 (Complexity)", props["Fsp3"])
+            c4.metric("Drug-Likeness", props["Drug-Likeness"])
             
             if energy_data:
                 df = pd.DataFrame(energy_data).sort_values("Stability Score (Rel)", ascending=False)
                 col_left, col_right = st.columns([1, 2])
                 
                 with col_left:
-                    st.subheader("Conformer Stability")
+                    st.subheader("Conformer Ranking")
                     st.dataframe(df[["ID", "Stability Score (Rel)", "RMSD (Å)"]], use_container_width=True)
                     sel_id = st.selectbox("Select ID for 3D View", df["ID"].tolist())
-                    
-                    if sel_id is not None:
-                        pdb_data = Chem.MolToPDBBlock(mol_ready, confId=int(sel_id))
-                        st.download_button("Download PDB", pdb_data, f"conf_{sel_id}.pdb")
+                    st.download_button("Download PDB", Chem.MolToPDBBlock(mol_ready, confId=int(sel_id)), f"conf_{sel_id}.pdb")
 
                 with col_right:
                     st.subheader(f"3D Visualizer (ID: {sel_id})")
-                    feats = get_pharmacophores(mol_ready, sel_id)
                     view = py3Dmol.view(width=800, height=500)
                     view.addModel(Chem.MolToMolBlock(mol_ready, confId=int(sel_id)), 'mol')
                     view.setStyle({'stick': {'radius': 0.15}, 'sphere': {'scale': 0.25}})
-                    for f in feats:
-                        p = f.GetPos(int(sel_id))
-                        col = "blue" if f.GetFamily()=="Donor" else "red" if f.GetFamily()=="Acceptor" else "orange"
-                        view.addSphere({'center':{'x':p.x,'y':p.y,'z':p.z}, 'radius':0.7, 'color':col, 'opacity':0.5})
                     view.zoomTo()
                     showmol(view, height=500, width=800)
+
+with tab2:
+    st.subheader("High-Throughput Batch Screening")
+    uploaded_file = st.file_uploader("Upload CSV", type=["csv"])
+    if uploaded_file:
+        batch_df = pd.read_csv(uploaded_file)
+        if "SMILES" in batch_df.columns:
+            results = []
+            for sm in batch_df["SMILES"]:
+                m = Chem.MolFromSmiles(str(sm))
+                if m:
+                    p = calculate_complex_properties(m)
+                    p["SMILES"] = sm
+                    results.append(p)
+            st.dataframe(pd.DataFrame(results), use_container_width=True)
