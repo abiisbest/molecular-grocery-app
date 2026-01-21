@@ -14,6 +14,11 @@ def check_pains(mol):
     catalog = FilterCatalog.FilterCatalog(params)
     return "Detected" if catalog.HasMatch(mol) else "Clean"
 
+def get_pharmacophores(mol, conf_id):
+    fdef_file = os.path.join(RDConfig.RDDataDir, 'BaseFeatures.fdef')
+    factory = ChemicalFeatures.BuildFeatureFactory(fdef_file)
+    return factory.GetFeaturesForMol(mol, confId=int(conf_id))
+
 def calculate_properties(mol):
     properties = {
         "MW": round(Descriptors.MolWt(mol), 2),
@@ -58,7 +63,6 @@ def generate_conformers(mol, num_conf):
     
     energy_list = []
     for d in raw_data:
-        # Relative Stability Score for lower/negative value representation
         rel_e = d["Raw"] - min_e
         rmsd = AllChem.GetConformerRMS(mol, best_id, d["ID"])
         energy_list.append({
@@ -85,48 +89,53 @@ with tab1:
             
             st.subheader("Molecular Properties")
             c1, c2, c3, c4, c5 = st.columns(5)
-            c1.metric("MW", props["MW"]); c2.metric("LogP", props["LogP"]); c3.metric("TPSA", props["TPSA"])
-            c4.metric("PAINS", props["PAINS"]); c5.metric("RO5", props["RO5 Violations"])
+            c1.metric("MW", props["MW"])
+            c2.metric("LogP", props["LogP"])
+            c3.metric("TPSA", props["TPSA"])
+            c4.metric("PAINS", props["PAINS"])
+            c5.metric("RO5 Violations", props["RO5 Violations"])
             
             if energy_data:
-                df = pd.DataFrame(energy_data).sort_values("ID")
+                df = pd.DataFrame(energy_data).sort_values("Stability Score (Rel)", ascending=False)
                 col_left, col_right = st.columns([1, 2])
                 
                 with col_left:
                     st.subheader("Conformer Stability")
                     st.dataframe(df[["ID", "Stability Score (Rel)", "RMSD (Å)"]], use_container_width=True)
                     
-                    st.divider()
-                    mode = st.radio("Display Mode", ["Static View", "Transition Animation (Fast)"])
-                    sel_id = st.selectbox("Select ID for PDB", df["ID"].tolist()) if mode == "Static View" else 0
+                    sel_id = st.selectbox("Select ID for 3D View", df["ID"].tolist())
                     
-                    pdb_data = Chem.MolToPDBBlock(mol_ready, confId=int(sel_id))
-                    st.download_button("Download PDB", pdb_data, f"conf_{sel_id}.pdb")
+                    if sel_id is not None:
+                        pdb_data = Chem.MolToPDBBlock(mol_ready, confId=int(sel_id))
+                        st.download_button("Download PDB", pdb_data, f"conf_{sel_id}.pdb")
 
                 with col_right:
-                    st.subheader("3D Transition Visualizer")
+                    st.subheader(f"3D Visualizer (ID: {sel_id})")
+                    feats = get_pharmacophores(mol_ready, sel_id)
                     view = py3Dmol.view(width=800, height=500)
-                    
-                    if mode == "Transition Animation (Fast)":
-                        # Add all conformers to one view for high-speed transition
-                        for cid in df["ID"].tolist():
-                            view.addModel(Chem.MolToMolBlock(mol_ready, confId=int(cid)), 'mol')
-                        view.setStyle({'stick': {'radius': 0.15}})
-                        # Speed set to 150ms for smooth 'vibrating' transition
-                        view.animate({'loop': 'forward', 'interval': 150})
-                    else:
-                        view.addModel(Chem.MolToMolBlock(mol_ready, confId=int(sel_id)), 'mol')
-                        view.setStyle({'stick': {'radius': 0.15}, 'sphere': {'scale': 0.25}})
-                    
+                    view.addModel(Chem.MolToMolBlock(mol_ready, confId=int(sel_id)), 'mol')
+                    view.setStyle({'stick': {'radius': 0.15}, 'sphere': {'scale': 0.25}})
+                    for f in feats:
+                        p = f.GetPos(int(sel_id))
+                        col = "blue" if f.GetFamily()=="Donor" else "red" if f.GetFamily()=="Acceptor" else "orange"
+                        view.addSphere({'center':{'x':p.x,'y':p.y,'z':p.z}, 'radius':0.7, 'color':col, 'opacity':0.5})
                     view.zoomTo()
                     showmol(view, height=500, width=800)
-                    st.info("Enable 'Transition Animation' and screen-record for your presentation video.")
+                    st.write("🔵 **Donor** | 🔴 **Acceptor** | 🟠 **Aromatic**")
 
 with tab2:
     st.subheader("High-Throughput Batch Screening")
-    uploaded_file = st.file_uploader("Upload CSV", type=["csv"])
+    uploaded_file = st.file_uploader("Upload CSV with 'SMILES' column", type=["csv"])
     if uploaded_file:
         batch_df = pd.read_csv(uploaded_file)
         if "SMILES" in batch_df.columns:
-            results = [calculate_properties(Chem.MolFromSmiles(sm)) for sm in batch_df["SMILES"] if Chem.MolFromSmiles(sm)]
-            st.dataframe(pd.DataFrame(results), use_container_width=True)
+            results = []
+            for sm in batch_df["SMILES"]:
+                m = Chem.MolFromSmiles(str(sm))
+                if m:
+                    p = calculate_properties(m)
+                    p["SMILES"] = sm
+                    results.append(p)
+            res_df = pd.DataFrame(results)
+            st.dataframe(res_df, use_container_width=True)
+            st.download_button("Download Batch Results (CSV)", res_df.to_csv(index=False).encode('utf-8'), "batch_results.csv")
