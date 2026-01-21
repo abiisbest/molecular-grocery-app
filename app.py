@@ -14,33 +14,34 @@ def check_pains(mol):
     catalog = FilterCatalog.FilterCatalog(params)
     return "Detected" if catalog.HasMatch(mol) else "Clean"
 
-def get_pharmacophores(mol, conf_id):
-    fdef_file = os.path.join(RDConfig.RDDataDir, 'BaseFeatures.fdef')
-    factory = ChemicalFeatures.BuildFeatureFactory(fdef_file)
-    return factory.GetFeaturesForMol(mol, confId=int(conf_id))
-
-def calculate_properties(mol):
+def calculate_advanced_properties(mol):
+    # Combining Physicochemical, ADME, and Electronic proxies
     properties = {
         "MW": round(Descriptors.MolWt(mol), 2),
         "LogP": round(Descriptors.MolLogP(mol), 2),
+        "TPSA": round(Descriptors.TPSA(mol), 2),
         "HBD": Lipinski.NumHDonors(mol),
         "HBA": Lipinski.NumHAcceptors(mol),
-        "TPSA": round(Descriptors.TPSA(mol), 2),
         "RotB": Lipinski.NumRotatableBonds(mol),
         "Fsp3": round(Descriptors.FractionCSP3(mol), 3),
-        "PAINS": check_pains(mol)
+        "Molar Refractivity": round(Descriptors.MolMR(mol), 2), # Electronic proxy
+        "PAINS Filter": check_pains(mol)
     }
-    violations = 0
-    if properties["MW"] > 500: violations += 1
-    if properties["LogP"] > 5: violations += 1
-    if properties["HBD"] > 5: violations += 1
-    if properties["HBA"] > 10: violations += 1
-    properties["RO5 Violations"] = violations
+    
+    # Bioavailability Checks
+    v = 0
+    if properties["MW"] > 500: v += 1
+    if properties["LogP"] > 5: v += 1
+    if properties["HBD"] > 5: v += 1
+    if properties["HBA"] > 10: v += 1
+    properties["RO5 Violations"] = v
+    properties["Veber Rule"] = "Pass" if (properties["RotB"] <= 10 and properties["TPSA"] <= 140) else "Fail"
+    
     return properties
 
 def generate_conformers(mol, num_conf):
     mol = Chem.AddHs(mol)
-    AllChem.ComputeGasteigerCharges(mol)
+    AllChem.ComputeGasteigerCharges(mol) # Partial charges (MOPAC-like feature)
     params = AllChem.ETKDGv3()
     params.randomSeed = 42
     params.pruneRmsThresh = 0.5 
@@ -84,25 +85,24 @@ with tab1:
     if smiles_input:
         mol_base = Chem.MolFromSmiles(smiles_input)
         if mol_base:
-            props = calculate_properties(mol_base)
+            props = calculate_advanced_properties(mol_base)
             energy_data, mol_ready = generate_conformers(mol_base, num_conf)
             
-            st.subheader("Molecular Properties")
+            st.subheader("Molecular, Electronic & ADME Properties")
             c1, c2, c3, c4, c5 = st.columns(5)
             c1.metric("MW", props["MW"])
             c2.metric("LogP", props["LogP"])
             c3.metric("TPSA", props["TPSA"])
-            c4.metric("PAINS", props["PAINS"])
-            c5.metric("RO5 Violations", props["RO5 Violations"])
+            c4.metric("Mol Refractivity", props["Molar Refractivity"])
+            c5.metric("Veber Rule", props["Veber Rule"])
             
             if energy_data:
                 df = pd.DataFrame(energy_data).sort_values("Stability Score (Rel)", ascending=False)
                 col_left, col_right = st.columns([1, 2])
                 
                 with col_left:
-                    st.subheader("Conformer Stability")
+                    st.subheader("Conformer Ranking")
                     st.dataframe(df[["ID", "Stability Score (Rel)", "RMSD (Å)"]], use_container_width=True)
-                    
                     sel_id = st.selectbox("Select ID for 3D View", df["ID"].tolist())
                     
                     if sel_id is not None:
@@ -111,14 +111,9 @@ with tab1:
 
                 with col_right:
                     st.subheader(f"3D Visualizer (ID: {sel_id})")
-                    feats = get_pharmacophores(mol_ready, sel_id)
                     view = py3Dmol.view(width=800, height=500)
                     view.addModel(Chem.MolToMolBlock(mol_ready, confId=int(sel_id)), 'mol')
                     view.setStyle({'stick': {'radius': 0.15}, 'sphere': {'scale': 0.25}})
-                    for f in feats:
-                        p = f.GetPos(int(sel_id))
-                        col = "blue" if f.GetFamily()=="Donor" else "red" if f.GetFamily()=="Acceptor" else "orange"
-                        view.addSphere({'center':{'x':p.x,'y':p.y,'z':p.z}, 'radius':0.7, 'color':col, 'opacity':0.5})
                     view.zoomTo()
                     showmol(view, height=500, width=800)
                     st.write("🔵 **Donor** | 🔴 **Acceptor** | 🟠 **Aromatic**")
@@ -133,7 +128,7 @@ with tab2:
             for sm in batch_df["SMILES"]:
                 m = Chem.MolFromSmiles(str(sm))
                 if m:
-                    p = calculate_properties(m)
+                    p = calculate_advanced_properties(m)
                     p["SMILES"] = sm
                     results.append(p)
             res_df = pd.DataFrame(results)
