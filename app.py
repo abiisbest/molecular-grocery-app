@@ -4,7 +4,7 @@ from rdkit.Chem import AllChem, RDConfig, ChemicalFeatures, Descriptors, Lipinsk
 import py3Dmol
 from stmol import showmol
 import pandas as pd
-import os
+import io
 
 st.set_page_config(page_title="Bioinformatics Analysis Platform", layout="wide")
 
@@ -18,9 +18,8 @@ def calculate_all_data(mol):
     AllChem.ComputeGasteigerCharges(mol)
     charges = [float(mol.GetAtomWithIdx(i).GetProp('_GasteigerCharge')) for i in range(mol.GetNumAtoms())]
     
-    # Comprehensive Data Dictionary
     data = {
-        "Basic": {
+        "Physicochemical": {
             "MW": round(Descriptors.MolWt(mol), 2),
             "LogP": round(Descriptors.MolLogP(mol), 2),
             "TPSA": round(Descriptors.TPSA(mol), 2),
@@ -28,7 +27,7 @@ def calculate_all_data(mol):
             "HBA": Lipinski.NumHAcceptors(mol),
             "RotB": Lipinski.NumRotatableBonds(mol),
         },
-        "Quantum/MOPAC": {
+        "Quantum & MOPAC": {
             "Mol Refractivity": round(Descriptors.MolMR(mol), 2),
             "Max Partial Charge": round(max(charges), 4),
             "Min Partial Charge": round(min(charges), 4),
@@ -80,66 +79,66 @@ def generate_conformers(mol, num_conf):
 
 st.title("Integrated Computational Platform for Molecular Property Prediction")
 
-main_tab1, main_tab2 = st.tabs(["Single Molecule Analysis", "Batch Screening"])
+input_tab, batch_tab = st.tabs(["Single Molecule / File Upload", "High-Throughput Batch Screening"])
 
-with main_tab1:
-    smiles_input = st.text_input("Enter SMILES:", "CC(C)c1c(c(c(n1CC[C@H](C[C@H](CC(=O)O)O)O)c2ccc(cc2)F)c3ccccc3)C(=O)Nc4ccccc4")
-    num_conf = st.slider("Conformers to Generate", 1, 50, 10)
-    
+with input_tab:
+    col_in1, col_in2 = st.columns(2)
+    with col_in1:
+        smiles_input = st.text_input("Enter SMILES string:", "")
+    with col_in2:
+        uploaded_file = st.file_uploader("OR Upload File (SDF, MOL2)", type=["sdf", "mol2"])
+
+    mol_to_analyze = None
     if smiles_input:
-        mol_base = Chem.MolFromSmiles(smiles_input)
-        if mol_base:
-            all_data = calculate_all_data(mol_base)
-            energy_data, mol_ready = generate_conformers(mol_base, num_conf)
+        mol_to_analyze = Chem.MolFromSmiles(smiles_input)
+    elif uploaded_file:
+        file_bytes = uploaded_file.read().decode("utf-8")
+        if uploaded_file.name.endswith(".sdf"):
+            mol_to_analyze = Chem.MolFromMolBlock(file_bytes)
+        else: # mol2
+            mol_to_analyze = Chem.MolFromMol2Block(file_bytes)
+
+    if mol_to_analyze:
+        num_conf = st.sidebar.slider("Conformers to Generate", 1, 50, 10)
+        all_data = calculate_all_data(mol_to_analyze)
+        energy_data, mol_ready = generate_conformers(mol_to_analyze, num_conf)
+        
+        st.divider()
+        category = st.selectbox("Select Analysis View:", list(all_data.keys()))
+        
+        display_cols = st.columns(len(all_data[category]))
+        for i, (k, v) in enumerate(all_data[category].items()):
+            display_cols[i].metric(k, v)
+
+        if energy_data:
+            df = pd.DataFrame(energy_data).sort_values("Stability Score (Rel)", ascending=False)
+            res_left, res_right = st.columns([1, 2])
             
-            # --- Data Display Selection ---
-            st.subheader("Analysis Results")
-            display_mode = st.selectbox("Select Data to Display:", 
-                                      ["Physicochemical Properties", "Quantum & MOPAC Proxies", "Lead Optimization Metrics"])
-            
-            cols = st.columns(len(all_data["Basic"]))
-            if display_mode == "Physicochemical Properties":
-                for i, (k, v) in enumerate(all_data["Basic"].items()):
-                    cols[i % len(cols)].metric(k, v)
-            elif display_mode == "Quantum & MOPAC Proxies":
-                q_cols = st.columns(len(all_data["Quantum/MOPAC"]))
-                for i, (k, v) in enumerate(all_data["Quantum/MOPAC"].items()):
-                    q_cols[i % len(q_cols)].metric(k, v)
-            else:
-                l_cols = st.columns(len(all_data["Lead Optimization"]))
-                for i, (k, v) in enumerate(all_data["Lead Optimization"].items()):
-                    l_cols[i % len(l_cols)].metric(k, v)
+            with res_left:
+                st.subheader("Stability Ranking")
+                st.dataframe(df, use_container_width=True)
+                sel_id = st.selectbox("Select ID for 3D View", df["ID"].tolist())
+                st.download_button("Download PDB", Chem.MolToPDBBlock(mol_ready, confId=int(sel_id)), f"conf_{sel_id}.pdb")
 
-            if energy_data:
-                df = pd.DataFrame(energy_data).sort_values("Stability Score (Rel)", ascending=False)
-                col_left, col_right = st.columns([1, 2])
-                
-                with col_left:
-                    st.subheader("Conformer Stability")
-                    st.dataframe(df, use_container_width=True)
-                    sel_id = st.selectbox("Select ID for 3D View", df["ID"].tolist())
-                    st.download_button("Download PDB", Chem.MolToPDBBlock(mol_ready, confId=int(sel_id)), f"conf_{sel_id}.pdb")
+            with res_right:
+                st.subheader(f"3D Visualizer (ID: {sel_id})")
+                view = py3Dmol.view(width=800, height=500)
+                view.addModel(Chem.MolToMolBlock(mol_ready, confId=int(sel_id)), 'mol')
+                view.setStyle({'stick': {'radius': 0.15}, 'sphere': {'scale': 0.25}})
+                view.zoomTo()
+                showmol(view, height=500, width=800)
 
-                with col_right:
-                    st.subheader(f"3D Visualizer (ID: {sel_id})")
-                    view = py3Dmol.view(width=800, height=500)
-                    view.addModel(Chem.MolToMolBlock(mol_ready, confId=int(sel_id)), 'mol')
-                    view.setStyle({'stick': {'radius': 0.15}, 'sphere': {'scale': 0.25}})
-                    view.zoomTo()
-                    showmol(view, height=500, width=800)
-
-with main_tab2:
-    st.subheader("High-Throughput Batch Screening")
-    uploaded_file = st.file_uploader("Upload CSV", type=["csv"])
-    if uploaded_file:
-        batch_df = pd.read_csv(uploaded_file)
-        if "SMILES" in batch_df.columns:
-            results = []
-            for sm in batch_df["SMILES"]:
+with batch_tab:
+    st.subheader("Batch Screening from CSV")
+    batch_file = st.file_uploader("Upload CSV with 'SMILES' column", type=["csv"])
+    if batch_file:
+        df_batch = pd.read_csv(batch_file)
+        if "SMILES" in df_batch.columns:
+            batch_results = []
+            for sm in df_batch["SMILES"]:
                 m = Chem.MolFromSmiles(str(sm))
                 if m:
                     p = calculate_all_data(m)
-                    # Flattening dictionary for dataframe
-                    flat_p = {**p["Basic"], **p["Quantum/MOPAC"], **p["Lead Optimization"], "SMILES": sm}
-                    results.append(flat_p)
-            st.dataframe(pd.DataFrame(results), use_container_width=True)
+                    flat_p = {**p["Physicochemical"], **p["Quantum & MOPAC"], **p["Lead Optimization"], "SMILES": sm}
+                    batch_results.append(flat_p)
+            st.dataframe(pd.DataFrame(batch_results), use_container_width=True)
