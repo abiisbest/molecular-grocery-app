@@ -58,12 +58,13 @@ def generate_conformers(mol, num_conf):
     
     energy_list = []
     for d in raw_data:
+        # We calculate "Stability Score" to give you the negative/relative values you need
         rel_e = d["Raw"] - min_e
         rmsd = AllChem.GetConformerRMS(mol, best_id, d["ID"])
         energy_list.append({
             "ID": int(d["ID"]), 
             "Energy (kcal/mol)": round(d["Raw"], 4),
-            "Stability Score": round(-rel_e, 4), 
+            "Stability Score (Rel)": round(-rel_e, 4), 
             "RMSD (Å)": round(rmsd, 3)
         })
     return energy_list, mol
@@ -88,7 +89,7 @@ with tab1:
             c2.metric("LogP", props["LogP"])
             c3.metric("TPSA", props["TPSA"])
             c4.metric("PAINS", props["PAINS"])
-            c5.metric("RO5 Violations", props["RO5 Violations"])
+            c5.metric("Violations", props["RO5 Violations"])
             
             if energy_data:
                 df = pd.DataFrame(energy_data).sort_values("ID")
@@ -96,33 +97,33 @@ with tab1:
                 
                 with col_left:
                     st.subheader("Conformer Stability")
-                    st.dataframe(df, use_container_width=True)
+                    # Stability Score (Rel) will show you the 0.00 and negative values
+                    st.dataframe(df[["ID", "Stability Score (Rel)", "RMSD (Å)"]], use_container_width=True)
                     
                     st.divider()
-                    mode = st.radio("View Mode", ["Static Selection", "Fast Movement Animation"])
+                    mode = st.radio("View Mode", ["Static Selection", "Molecular Movement Animation"])
                     
                     if mode == "Static Selection":
                         sel_id = st.selectbox("Select ID", df["ID"].tolist())
                     else:
-                        st.info("Animating all conformers to show molecular flexibility.")
-                        sel_id = 0 # Default starting point
+                        sel_id = 0 
                     
                     pdb_data = Chem.MolToPDBBlock(mol_ready, confId=int(sel_id))
-                    st.download_button("Download Selected PDB", pdb_data, f"conf_{sel_id}.pdb")
+                    st.download_button("Download PDB", pdb_data, f"conf_{sel_id}.pdb")
 
                 with col_right:
                     st.subheader("3D Visualizer")
                     view = py3Dmol.view(width=800, height=500)
                     
-                    if mode == "Fast Movement Animation":
-                        # Load all conformers into one model to enable fast animation
+                    if mode == "Molecular Movement Animation":
+                        # Load all conformers at once to show the "ensemble" movement
                         for cid in df["ID"].tolist():
                             mb = Chem.MolToMolBlock(mol_ready, confId=int(cid))
                             view.addModel(mb, 'mol')
                         
                         view.setStyle({'stick': {'radius': 0.15}})
-                        # Fast interval (200ms) to show movement
-                        view.animate({'loop': 'forward', 'interval': 200})
+                        # High speed interval (150ms) to show movement/vibration
+                        view.animate({'loop': 'forward', 'interval': 150})
                     else:
                         mb = Chem.MolToMolBlock(mol_ready, confId=int(sel_id))
                         view.addModel(mb, 'mol')
@@ -130,21 +131,13 @@ with tab1:
                     
                     view.zoomTo()
                     showmol(view, height=500, width=800)
-                    st.caption("Use 'Fast Movement Animation' to see conformer transitions for your video.")
+                    st.info("Switch to 'Molecular Movement Animation' to see the high-speed conformer transitions.")
 
 with tab2:
     st.subheader("High-Throughput Batch Screening")
-    uploaded_file = st.file_uploader("Upload CSV with 'SMILES' column", type=["csv"])
+    uploaded_file = st.file_uploader("Upload CSV", type=["csv"])
     if uploaded_file:
         batch_df = pd.read_csv(uploaded_file)
         if "SMILES" in batch_df.columns:
-            results = []
-            for sm in batch_df["SMILES"]:
-                m = Chem.MolFromSmiles(str(sm))
-                if m:
-                    p = calculate_properties(m)
-                    p["SMILES"] = sm
-                    results.append(p)
-            res_df = pd.DataFrame(results)
-            st.dataframe(res_df, use_container_width=True)
-            st.download_button("Download Results (CSV)", res_df.to_csv(index=False).encode('utf-8'), "batch_results.csv")
+            results = [calculate_properties(Chem.MolFromSmiles(sm)) for sm in batch_df["SMILES"] if Chem.MolFromSmiles(sm)]
+            st.dataframe(pd.DataFrame(results), use_container_width=True)
