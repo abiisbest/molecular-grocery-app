@@ -10,27 +10,25 @@ import io
 st.set_page_config(page_title="Bioinformatics Analysis Platform", layout="wide")
 
 def get_internal_coordinates(mol, conf_id):
-    # Generating a Z-Matrix style internal coordinate representation
     conf = mol.GetConformer(conf_id)
     atoms = mol.GetAtoms()
     z_matrix = []
     for i in range(len(atoms)):
-        pos = conf.GetAtomPosition(i)
         if i == 0:
             z_matrix.append([atoms[i].GetSymbol(), "", "", ""])
         elif i == 1:
             dist = AllChem.GetBondLength(conf, 0, 1)
-            z_matrix.append([atoms[i].GetSymbol(), f"R(1,0): {dist:.3f}", "", ""])
+            z_matrix.append([atoms[i].GetSymbol(), f"{dist:.3f}", "", ""])
         elif i == 2:
             dist = AllChem.GetBondLength(conf, 1, 2)
             ang = AllChem.GetAngleDeg(conf, 0, 1, 2)
-            z_matrix.append([atoms[i].GetSymbol(), f"R(2,1): {dist:.3f}", f"A(2,1,0): {ang:.2f}", ""])
+            z_matrix.append([atoms[i].GetSymbol(), f"{dist:.3f}", f"{ang:.2f}", ""])
         else:
             dist = AllChem.GetBondLength(conf, i-1, i)
             ang = AllChem.GetAngleDeg(conf, i-2, i-1, i)
             dih = AllChem.GetDihedralDeg(conf, i-3, i-2, i-1, i)
-            z_matrix.append([atoms[i].GetSymbol(), f"R: {dist:.3f}", f"A: {ang:.2f}", f"D: {dih:.2f}"])
-    return pd.DataFrame(z_matrix, columns=["Atom", "Distance (Å)", "Angle (°)", "Dihedral (°)"])
+            z_matrix.append([atoms[i].GetSymbol(), f"{dist:.3f}", f"{ang:.2f}", f"{dih:.2f}"])
+    return pd.DataFrame(z_matrix, columns=["Atom", "Dist (Å)", "Angle (°)", "Dihedral (°)"])
 
 def calculate_all_data(mol):
     AllChem.ComputeGasteigerCharges(mol)
@@ -50,6 +48,11 @@ def calculate_all_data(mol):
             "Min Partial Charge": round(min(charges), 4),
             "Labute ASA": round(Descriptors.LabuteASA(mol), 2),
             "Fsp3": round(Descriptors.FractionCSP3(mol), 3),
+        },
+        "Lead Optimization": {
+            "RO5 Violations": sum([Descriptors.MolWt(mol) > 500, Descriptors.MolLogP(mol) > 5, 
+                                 Lipinski.NumHDonors(mol) > 5, Lipinski.NumHAcceptors(mol) > 10]),
+            "Veber Rule": "Pass" if (Lipinski.NumRotatableBonds(mol) <= 10 and Descriptors.TPSA(mol) <= 140) else "Fail"
         }
     }
     return data
@@ -79,59 +82,73 @@ def generate_conformers(mol, num_conf):
         energy_list.append({"ID": int(d["ID"]), "Energy": round(d["Raw"], 4), "Rel_E": round(rel_e, 4), "RMSD": round(rmsd, 3)})
     return energy_list, mol
 
-st.title("Integrated Computational Platform for Molecular Property Prediction")
+st.title("Bioinformatics Analysis Platform")
 
-input_tab, batch_tab = st.tabs(["Analysis & PES Scan", "Batch Screening"])
+# Input Section
+st.subheader("Molecular Input")
+input_mode = st.radio("Choose Input Method:", ["SMILES String", "Upload File (SDF/MOL2)"])
 
-with input_tab:
-    smiles_input = st.text_input("Enter SMILES string:", "CC(C)c1c(c(c(n1CC[C@H](C[C@H](CC(=O)O)O)O)c2ccc(cc2)F)c3ccccc3)C(=O)Nc4ccccc4")
+mol_ready_to_analyze = None
+if input_mode == "SMILES String":
+    smiles_text = st.text_input("Enter SMILES:", "CC(C)c1c(c(c(n1CC[C@H](C[C@H](CC(=O)O)O)O)c2ccc(cc2)F)c3ccccc3)C(=O)Nc4ccccc4")
+    if smiles_text:
+        mol_ready_to_analyze = Chem.MolFromSmiles(smiles_text)
+else:
+    up_file = st.file_uploader("Upload SDF or MOL2", type=["sdf", "mol2"])
+    if up_file:
+        raw_content = up_file.read().decode("utf-8")
+        if up_file.name.endswith(".sdf"):
+            mol_ready_to_analyze = Chem.MolFromMolBlock(raw_content)
+        else:
+            mol_ready_to_analyze = Chem.MolFromMol2Block(raw_content)
+
+if mol_ready_to_analyze:
+    num_conf = st.sidebar.slider("Conformers", 1, 50, 10)
+    all_data = calculate_all_data(mol_ready_to_analyze)
+    energy_data, mol_final = generate_conformers(mol_ready_to_analyze, num_conf)
     
-    if smiles_input:
-        mol_base = Chem.MolFromSmiles(smiles_input)
-        if mol_base:
-            num_conf = st.sidebar.slider("Conformers", 1, 50, 10)
-            all_data = calculate_all_data(mol_base)
-            energy_data, mol_ready = generate_conformers(mol_base, num_conf)
-            
-            # --- PES Graph Section ---
-            st.subheader("Potential Energy Surface (PES) Scan")
-            df_pes = pd.DataFrame(energy_data).sort_values("RMSD")
-            fig = go.Figure()
-            fig.add_trace(go.Scatter(x=df_pes["RMSD"], y=df_pes["Rel_E"], mode='lines+markers', name='PES Scan'))
-            fig.update_layout(xaxis_title="RMSD from Global Minimum (Å)", yaxis_title="Relative Energy (kcal/mol)", height=400)
-            st.plotly_chart(fig, use_container_width=True)
-            
+    # Potential Energy Surface (PES) Graph
+    st.subheader("Potential Energy Surface (PES) Graph")
+    df_pes = pd.DataFrame(energy_data).sort_values("RMSD")
+    fig = go.Figure()
+    fig.add_trace(go.Scatter(x=df_pes["RMSD"], y=df_pes["Rel_E"], mode='lines+markers', line_color='teal'))
+    fig.update_layout(xaxis_title="RMSD (Å)", yaxis_title="Relative Energy (kcal/mol)", height=400)
+    st.plotly_chart(fig, use_container_width=True)
+    [Image of potential energy surface scan graph]
 
-            st.divider()
-            
-            # --- Coordinates & 3D Section ---
-            col_left, col_right = st.columns([1, 1])
-            
-            with col_left:
-                st.subheader("Geometry Analysis")
-                coord_mode = st.radio("Coordinate Type:", ["Cartesian (XYZ)", "Internal (Z-Matrix)"])
-                sel_id = st.selectbox("Select Conformer ID:", [d["ID"] for d in energy_data])
-                
-                if coord_mode == "Cartesian (XYZ)":
-                    xyz_block = Chem.MolToXYZBlock(mol_ready, confId=int(sel_id))
-                    st.text_area("XYZ Coordinates", xyz_block, height=300)
-                else:
-                    zmat_df = get_internal_coordinates(mol_ready, int(sel_id))
-                    st.dataframe(zmat_df, use_container_width=True)
-                
-                st.download_button("Download PDB", Chem.MolToPDBBlock(mol_ready, confId=int(sel_id)), f"conf_{sel_id}.pdb")
+    st.divider()
 
-            with col_right:
-                st.subheader("3D Visualizer")
-                view = py3Dmol.view(width=600, height=400)
-                view.addModel(Chem.MolToMolBlock(mol_ready, confId=int(sel_id)), 'mol')
-                view.setStyle({'stick': {'radius': 0.15}, 'sphere': {'scale': 0.25}})
-                view.zoomTo()
-                showmol(view, height=400, width=600)
+    # Geometry & Data Tabs
+    st.subheader("Structural & Property Analysis")
+    data_tab, geom_tab = st.tabs(["Molecular Data", "Geometric Coordinates"])
 
-            # --- Properties Dropdown ---
-            st.divider()
-            category = st.selectbox("View Additional Data:", list(all_data.keys()))
-            prop_cols = st.columns(len(all_data[category]))
-            for i, (k, v) in enumerate(all_data[category].items()):
-                prop_cols[i].metric(k, v)
+    with data_tab:
+        category = st.selectbox("Display Data:", list(all_data.keys()))
+        m_cols = st.columns(len(all_data[category]))
+        for i, (k, v) in enumerate(all_data[category].items()):
+            m_cols[i].metric(k, v)
+        
+        st.subheader("Stability Analysis")
+        st.dataframe(pd.DataFrame(energy_data), use_container_width=True)
+
+    with geom_tab:
+        sel_id = st.selectbox("Select ID for Coordinates:", [d["ID"] for d in energy_data])
+        g_col1, g_col2 = st.columns(2)
+        
+        with g_col1:
+            st.write("**Cartesian Coordinates (XYZ)**")
+            st.text_area("XYZ Block", Chem.MolToXYZBlock(mol_final, confId=int(sel_id)), height=250)
+        
+        with g_col2:
+            st.write("**Internal Coordinates (Z-Matrix)**")
+            st.dataframe(get_internal_coordinates(mol_final, int(sel_id)), use_container_width=True)
+
+    # 3D Visualizer
+    st.divider()
+    st.subheader(f"3D Conformational Visualizer (ID: {sel_id})")
+    view = py3Dmol.view(width=800, height=500)
+    view.addModel(Chem.MolToMolBlock(mol_final, confId=int(sel_id)), 'mol')
+    view.setStyle({'stick': {'radius': 0.15}, 'sphere': {'scale': 0.25}})
+    view.zoomTo()
+    showmol(view, height=500, width=800)
+    st.download_button("Download PDB", Chem.MolToPDBBlock(mol_final, confId=int(sel_id)), f"conformer_{sel_id}.pdb")
