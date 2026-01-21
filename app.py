@@ -35,7 +35,7 @@ def generate_conformers(smiles, num_conf):
         if ff:
             ff.Minimize()
             energy = ff.CalcEnergy()
-            data.append({"ID": conf_id, "Energy (kcal/mol)": energy})
+            data.append({"ID": conf_id, "Energy (kcal/mol)": round(energy, 4)})
             
     return mol, data
 
@@ -44,11 +44,9 @@ st.markdown("### Conformational Energy Analysis & Pharmacophore Mapping")
 
 smiles_input = st.text_input("Enter 2D SMILES:", "CC(C)c1c(c(c(n1CC[C@H](C[C@H](CC(=O)O)O)O)c2ccc(cc2)F)c3ccccc3)C(=O)Nc4ccccc4")
 
-# Moved from sidebar to main page for better visibility
 num_conf = st.slider("Select Number of Conformers to Generate", min_value=1, max_value=50, value=10)
 
 if smiles_input:
-    # We pass the num_conf value directly here
     mol, energy_data = generate_conformers(smiles_input, num_conf)
     
     if mol and energy_data:
@@ -58,6 +56,7 @@ if smiles_input:
         
         with col1:
             st.subheader(f"Results for {len(df)} Unique Conformers")
+            st.write("The lowest energy value represents the most stable state.")
             st.dataframe(df)
             
             csv = df.to_csv(index=False).encode('utf-8')
