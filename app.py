@@ -1,12 +1,18 @@
 import streamlit as st
 from rdkit import Chem
-from rdkit.Chem import AllChem, RDConfig, ChemicalFeatures, Descriptors, Lipinski
+from rdkit.Chem import AllChem, RDConfig, ChemicalFeatures, Descriptors, Lipinski, FilterCatalog
 import py3Dmol
 from stmol import showmol
 import pandas as pd
 import os
 
 st.set_page_config(page_title="Bioinformatics Analysis Platform", layout="wide")
+
+def check_pains(mol):
+    params = FilterCatalog.FilterCatalogParams()
+    params.AddCatalog(FilterCatalog.FilterCatalogParams.FilterCatalogs.PAINS)
+    catalog = FilterCatalog.FilterCatalog(params)
+    return catalog.HasMatch(mol)
 
 def get_pharmacophores(mol, conf_id):
     fdef_file = os.path.join(RDConfig.RDDataDir, 'BaseFeatures.fdef')
@@ -20,14 +26,16 @@ def calculate_properties(mol):
         "HBD": Lipinski.NumHDonors(mol),
         "HBA": Lipinski.NumHAcceptors(mol),
         "TPSA": round(Descriptors.TPSA(mol), 2),
-        "RotB": Lipinski.NumRotatableBonds(mol)
+        "RotB": Lipinski.NumRotatableBonds(mol),
+        "Fraction Csp3": round(Descriptors.FractionCSP3(mol), 2),
+        "PAINS Alert": "Detected" if check_pains(mol) else "Clean"
     }
     violations = 0
     if properties["MW"] > 500: violations += 1
     if properties["LogP"] > 5: violations += 1
     if properties["HBD"] > 5: violations += 1
     if properties["HBA"] > 10: violations += 1
-    properties["Violations"] = violations
+    properties["Lipinski Violations"] = violations
     return properties
 
 def generate_conformers(smiles, num_conf):
@@ -77,14 +85,17 @@ if smiles_input:
     
     if mol and mol_props:
         st.subheader("Predicted Molecular Properties")
-        met_cols = st.columns(7)
+        met_cols = st.columns(4)
         met_cols[0].metric("MW", mol_props["MW"])
         met_cols[1].metric("LogP", mol_props["LogP"])
         met_cols[2].metric("TPSA", mol_props["TPSA"])
-        met_cols[3].metric("HBD", mol_props["HBD"])
-        met_cols[4].metric("HBA", mol_props["HBA"])
-        met_cols[5].metric("RotB", mol_props["RotB"])
-        met_cols[6].metric("Violations", mol_props["Violations"])
+        met_cols[3].metric("PAINS Alert", mol_props["PAINS Alert"])
+
+        met_cols_2 = st.columns(4)
+        met_cols_2[0].metric("HBD", mol_props["HBD"])
+        met_cols_2[1].metric("HBA", mol_props["HBA"])
+        met_cols_2[2].metric("RotB", mol_props["RotB"])
+        met_cols_2[3].metric("Violations", mol_props["Lipinski Violations"])
 
         if energy_data:
             df = pd.DataFrame(energy_data).sort_values("Rel Energy")
