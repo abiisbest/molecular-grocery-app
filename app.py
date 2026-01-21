@@ -84,7 +84,6 @@ def generate_conformers(mol, num_conf):
 
 st.title("Bioinformatics Analysis Platform")
 
-# Input Section
 st.subheader("Molecular Input")
 input_mode = st.radio("Choose Input Method:", ["SMILES String", "Upload File (SDF/MOL2)"])
 
@@ -107,18 +106,15 @@ if mol_ready_to_analyze:
     all_data = calculate_all_data(mol_ready_to_analyze)
     energy_data, mol_final = generate_conformers(mol_ready_to_analyze, num_conf)
     
-    # Potential Energy Surface (PES) Graph
     st.subheader("Potential Energy Surface (PES) Graph")
     df_pes = pd.DataFrame(energy_data).sort_values("RMSD")
     fig = go.Figure()
     fig.add_trace(go.Scatter(x=df_pes["RMSD"], y=df_pes["Rel_E"], mode='lines+markers', line_color='teal'))
     fig.update_layout(xaxis_title="RMSD (Å)", yaxis_title="Relative Energy (kcal/mol)", height=400)
     st.plotly_chart(fig, use_container_width=True)
-    [Image of potential energy surface scan graph]
 
     st.divider()
 
-    # Geometry & Data Tabs
     st.subheader("Structural & Property Analysis")
     data_tab, geom_tab = st.tabs(["Molecular Data", "Geometric Coordinates"])
 
@@ -143,7 +139,6 @@ if mol_ready_to_analyze:
             st.write("**Internal Coordinates (Z-Matrix)**")
             st.dataframe(get_internal_coordinates(mol_final, int(sel_id)), use_container_width=True)
 
-    # 3D Visualizer
     st.divider()
     st.subheader(f"3D Conformational Visualizer (ID: {sel_id})")
     view = py3Dmol.view(width=800, height=500)
