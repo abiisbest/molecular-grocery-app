@@ -4,6 +4,7 @@ from rdkit.Chem import AllChem, RDConfig, ChemicalFeatures, Descriptors, Lipinsk
 import py3Dmol
 from stmol import showmol
 import pandas as pd
+import time
 import os
 
 st.set_page_config(page_title="Bioinformatics Analysis Platform", layout="wide")
@@ -95,39 +96,63 @@ with tab1:
             c4.metric("PAINS Filter", props["PAINS"])
             
             if energy_data:
-                df = pd.DataFrame(energy_data).sort_values("Stability Score", ascending=False)
+                df = pd.DataFrame(energy_data).sort_values("ID") # Sort by ID for sequential transition
                 col_left, col_right = st.columns([1, 2])
                 
                 with col_left:
                     st.subheader("Conformer Stability")
                     st.dataframe(df, use_container_width=True)
-                    sel_id = st.selectbox("Select ID for 3D View", df["ID"].tolist())
                     
-                    if sel_id is not None:
-                        pdb_data = Chem.MolToPDBBlock(mol_ready, confId=int(sel_id))
-                        st.download_button("Download PDB", pdb_data, f"conf_{sel_id}.pdb")
-                        
-                    # Animation Control
                     st.divider()
-                    animate = st.checkbox("Toggle Auto-Rotation (Animation)")
-                
+                    play_slideshow = st.button("▶ Start Conformer Slideshow (0-9)")
+                    stop_slideshow = st.button("⏹ Stop")
+                    
+                    # Manage manual selection if slideshow is off
+                    if 'current_idx' not in st.session_state:
+                        st.session_state.current_idx = 0
+                    
+                    sel_id = st.selectbox("Select ID for 3D View", df["ID"].tolist(), index=st.session_state.current_idx)
+                    
+                    pdb_data = Chem.MolToPDBBlock(mol_ready, confId=int(sel_id))
+                    st.download_button("Download PDB", pdb_data, f"conf_{sel_id}.pdb")
+
                 with col_right:
                     st.subheader(f"3D Visualizer (ID: {sel_id})")
-                    feats = get_pharmacophores(mol_ready, sel_id)
-                    view = py3Dmol.view(width=800, height=500)
-                    view.addModel(Chem.MolToMolBlock(mol_ready, confId=int(sel_id)), 'mol')
-                    view.setStyle({'stick': {'radius': 0.15}, 'sphere': {'scale': 0.25}})
-                    for f in feats:
-                        p = f.GetPos(int(sel_id))
-                        col = "blue" if f.GetFamily()=="Donor" else "red" if f.GetFamily()=="Acceptor" else "orange"
-                        view.addSphere({'center':{'x':p.x,'y':p.y,'z':p.z}, 'radius':0.7, 'color':col, 'opacity':0.5})
                     
-                    if animate:
-                        view.spin(True)
-                    
-                    view.zoomTo()
-                    showmol(view, height=500, width=800)
-                    st.info("To save as video: Use a screen recorder while 'Auto-Rotation' is enabled.")
+                    # Slideshow Logic
+                    if play_slideshow:
+                        for i in range(len(df)):
+                            st.session_state.current_idx = i
+                            current_id = df.iloc[i]["ID"]
+                            
+                            # Update Visualizer
+                            feats = get_pharmacophores(mol_ready, current_id)
+                            view = py3Dmol.view(width=800, height=500)
+                            view.addModel(Chem.MolToMolBlock(mol_ready, confId=int(current_id)), 'mol')
+                            view.setStyle({'stick': {'radius': 0.15}, 'sphere': {'scale': 0.25}})
+                            for f in feats:
+                                p = f.GetPos(int(current_id))
+                                col = "blue" if f.GetFamily()=="Donor" else "red" if f.GetFamily()=="Acceptor" else "orange"
+                                view.addSphere({'center':{'x':p.x,'y':p.y,'z':p.z}, 'radius':0.7, 'color':col, 'opacity':0.5})
+                            view.zoomTo()
+                            showmol(view, height=500, width=800)
+                            time.sleep(1) # Interval for video capture
+                            st.rerun()
+
+                    # Static View Logic (if slideshow not active)
+                    else:
+                        feats = get_pharmacophores(mol_ready, sel_id)
+                        view = py3Dmol.view(width=800, height=500)
+                        view.addModel(Chem.MolToMolBlock(mol_ready, confId=int(sel_id)), 'mol')
+                        view.setStyle({'stick': {'radius': 0.15}, 'sphere': {'scale': 0.25}})
+                        for f in feats:
+                            p = f.GetPos(int(sel_id))
+                            col = "blue" if f.GetFamily()=="Donor" else "red" if f.GetFamily()=="Acceptor" else "orange"
+                            view.addSphere({'center':{'x':p.x,'y':p.y,'z':p.z}, 'radius':0.7, 'color':col, 'opacity':0.5})
+                        view.zoomTo()
+                        showmol(view, height=500, width=800)
+
+                    st.write("🔵 **Donor** | 🔴 **Acceptor** | 🟠 **Aromatic**")
 
 with tab2:
     st.subheader("High-Throughput Batch Screening")
