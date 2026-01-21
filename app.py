@@ -4,7 +4,6 @@ from rdkit.Chem import AllChem, RDConfig, ChemicalFeatures, Descriptors, Lipinsk
 import py3Dmol
 from stmol import showmol
 import pandas as pd
-import io
 import os
 
 st.set_page_config(page_title="Bioinformatics Analysis Platform", layout="wide")
@@ -46,7 +45,7 @@ def generate_conformers(mol, num_conf):
     params.randomSeed = 42
     params.pruneRmsThresh = 0.5 
     ids = AllChem.EmbedMultipleConfs(mol, numConfs=num_conf, params=params)
-    if not ids: return None
+    if not ids: return None, None
     
     raw_data = []
     for conf_id in ids:
@@ -57,7 +56,7 @@ def generate_conformers(mol, num_conf):
             energy = ff.CalcEnergy()
             raw_data.append({"ID": conf_id, "Raw": energy})
     
-    if not raw_data: return None
+    if not raw_data: return None, None
     
     min_e = min(d["Raw"] for d in raw_data)
     best_id = min(raw_data, key=lambda x: x["Raw"])["ID"]
@@ -69,9 +68,9 @@ def generate_conformers(mol, num_conf):
         energy_list.append({
             "ID": int(d["ID"]), 
             "Stability Score": round(-rel_e, 4), 
-            "RMSD": round(rmsd, 3)
+            "RMSD (Å)": round(rmsd, 3)
         })
-    return energy_list
+    return energy_list, mol
 
 st.title("Integrated Computational Platform for Molecular Property Prediction")
 
@@ -79,13 +78,13 @@ tab1, tab2 = st.tabs(["Single Molecule Analysis", "Batch Processing"])
 
 with tab1:
     smiles_input = st.text_input("Enter SMILES:", "CC(C)c1c(c(c(n1CC[C@H](C[C@H](CC(=O)O)O)O)c2ccc(cc2)F)c3ccccc3)C(=O)Nc4ccccc4")
-    num_conf = st.slider("Conformers", 1, 50, 10, key="single_slider")
+    num_conf = st.slider("Conformers to Generate", 1, 50, 10, key="single_slider")
     
     if smiles_input:
-        mol = Chem.MolFromSmiles(smiles_input)
-        if mol:
-            props = calculate_properties(mol)
-            energy_data = generate_conformers(mol, num_conf)
+        mol_base = Chem.MolFromSmiles(smiles_input)
+        if mol_base:
+            props = calculate_properties(mol_base)
+            energy_data, mol_ready = generate_conformers(mol_base, num_conf)
             
             st.subheader("Molecular Properties")
             c1, c2, c3, c4 = st.columns(4)
@@ -99,24 +98,15 @@ with tab1:
                 col_left, col_right = st.columns([1, 2])
                 
                 with col_left:
-                    st.subheader("Conformer Ranking")
+                    st.subheader("Conformer Stability & RMSD")
+                    st.write("RMSD is relative to the highest Stability Score (0.00).")
                     st.dataframe(df, use_container_width=True)
                     
-                    # Ensure selection is safe
                     sel_id = st.selectbox("Select ID for 3D View", df["ID"].tolist())
                     
                     if sel_id is not None:
-                        # Regenerate block inside the conditional to prevent ValueError
-                        mol_ready = Chem.AddHs(mol)
-                        AllChem.EmbedMultipleConfs(mol_ready, numConfs=num_conf, params=AllChem.ETKDGv3())
                         pdb_data = Chem.MolToPDBBlock(mol_ready, confId=int(sel_id))
-                        
-                        st.download_button(
-                            label="Download PDB",
-                            data=pdb_data,
-                            file_name=f"conformer_{sel_id}.pdb",
-                            mime="chemical/x-pdb"
-                        )
+                        st.download_button("Download PDB", pdb_data, f"conf_{sel_id}.pdb")
                 
                 with col_right:
                     st.subheader(f"3D Visualizer (ID: {sel_id})")
@@ -147,6 +137,4 @@ with tab2:
                     results.append(p)
             res_df = pd.DataFrame(results)
             st.dataframe(res_df, use_container_width=True)
-            st.download_button("Download Results (CSV)", res_df.to_csv(index=False).encode('utf-8'), "batch_results.csv")
-        else:
-            st.error("CSV must contain a column named 'SMILES'.")
+            st.download_button("Download Batch Results (CSV)", res_df.to_csv(index=False).encode('utf-8'), "batch_results.csv")
