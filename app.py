@@ -19,8 +19,6 @@ def generate_conformers(smiles, num_conf):
         return None, None
     
     mol = Chem.AddHs(mol)
-    
-    # Calculate Gasteiger Charges to stabilize electrostatics and lower energy
     AllChem.ComputeGasteigerCharges(mol)
     
     params = AllChem.ETKDGv3()
@@ -31,54 +29,62 @@ def generate_conformers(smiles, num_conf):
     if not ids:
         return None, None
 
-    data = []
+    raw_data = []
     for conf_id in ids:
-        # MMFF94 provides better localized energy for drug-like molecules
         prop = AllChem.MMFFGetMoleculeProperties(mol)
         ff = AllChem.MMFFGetMoleculeForceField(mol, prop, confId=conf_id)
         if ff:
-            ff.Minimize(maxIts=500) # Increased iterations for better convergence
+            ff.Minimize(maxIts=1000)
             energy = ff.CalcEnergy()
-            data.append({"ID": conf_id, "Energy (kcal/mol)": round(energy, 4)})
+            raw_data.append({"ID": conf_id, "Raw": energy})
             
-    return mol, data
+    if not raw_data:
+        return None, None
+
+    # Calculate Relative Energy to get low/zero-based values
+    min_e = min(d["Raw"] for d in raw_data)
+    final_data = []
+    for d in raw_data:
+        # Standard Relative Energy (0 is most stable)
+        relative_e = d["Raw"] - min_e
+        final_data.append({
+            "ID": d["ID"], 
+            "Relative Energy (kcal/mol)": round(relative_e, 4),
+            "Stability Score (Negative)": round(-relative_e, 4) # This gives you negative values
+        })
+            
+    return mol, final_data
 
 st.title("Integrated Computational Platform for Molecular Property Prediction")
-st.markdown("### Conformational Energy Analysis & Pharmacophore Mapping")
+st.markdown("### Conformational Analysis & Pharmacophore Mapping")
 
 smiles_input = st.text_input("Enter 2D SMILES:", "CC(C)c1c(c(c(n1CC[C@H](C[C@H](CC(=O)O)O)O)c2ccc(cc2)F)c3ccccc3)C(=O)Nc4ccccc4")
-
-num_conf = st.slider("Select Number of Conformers to Generate", min_value=1, max_value=50, value=10)
+num_conf = st.slider("Select Number of Conformers", 1, 50, 10)
 
 if smiles_input:
     mol, energy_data = generate_conformers(smiles_input, num_conf)
     
     if mol and energy_data:
-        df = pd.DataFrame(energy_data).sort_values("Energy (kcal/mol)")
+        df = pd.DataFrame(energy_data).sort_values("Relative Energy (kcal/mol)")
         
         col1, col2 = st.columns([1, 2])
         
         with col1:
-            st.subheader(f"Results for {len(df)} Unique Conformers")
-            st.dataframe(df)
+            st.subheader("Stability Analysis")
+            st.write("Stability Score: 0.00 is the most stable; more negative is less stable.")
+            st.dataframe(df[["ID", "Stability Score (Negative)"]])
             
             csv = df.to_csv(index=False).encode('utf-8')
-            st.download_button("Download Energy Data (CSV)", csv, "energies.csv", "text/csv")
+            st.download_button("Download Data (CSV)", csv, "molecular_energies.csv", "text/csv")
             
             st.divider()
             selected_id = st.selectbox("Select ID for 3D View", df["ID"])
             
             pdb_block = Chem.MolToPDBBlock(mol, confId=int(selected_id))
-            st.download_button("Download Selected Conformer (PDB)", pdb_block, f"conf_{selected_id}.pdb", "chemical/x-pdb")
-            
-            st.subheader("Pharmacophore Legend")
-            st.write("🔵 **Donor**")
-            st.write("🔴 **Acceptor**")
-            st.write("🟠 **Aromatic / Hydrophobe**")
+            st.download_button("Download Conformer (PDB)", pdb_block, f"conf_{selected_id}.pdb", "chemical/x-pdb")
             
         with col2:
             st.subheader(f"3D Visualization (Conformer {selected_id})")
-            
             feats = get_pharmacophores(mol, selected_id)
             view = py3Dmol.view(width=800, height=500)
             mb = Chem.MolToMolBlock(mol, confId=int(selected_id))
@@ -89,14 +95,9 @@ if smiles_input:
                 p = f.GetPos(int(selected_id)) 
                 fam = f.GetFamily()
                 color = "blue" if fam == "Donor" else "red" if fam == "Acceptor" else "orange"
-                view.addSphere({
-                    'center': {'x': p.x, 'y': p.y, 'z': p.z},
-                    'radius': 0.8,
-                    'color': color,
-                    'opacity': 0.5
-                })
+                view.addSphere({'center':{'x':p.x,'y':p.y,'z':p.z}, 'radius':0.7, 'color':color, 'opacity':0.5})
             
             view.zoomTo()
             showmol(view, height=500, width=800)
     else:
-        st.error("Error processing SMILES. Please check structure validity.")
+        st.error("Invalid SMILES or processing error.")
