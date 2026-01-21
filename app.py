@@ -22,7 +22,6 @@ def generate_conformers(smiles, num_conf):
     
     params = AllChem.ETKDGv3()
     params.randomSeed = 42
-    # Ensures conformers are physically distinct by 0.5 Angstrom RMSD
     params.pruneRmsThresh = 0.5 
     
     ids = AllChem.EmbedMultipleConfs(mol, numConfs=num_conf, params=params)
@@ -43,12 +42,13 @@ def generate_conformers(smiles, num_conf):
 st.title("Integrated Computational Platform for Molecular Property Prediction")
 st.markdown("### Conformational Energy Analysis & Pharmacophore Mapping")
 
-# Default SMILES: Atorvastatin (Lipitor)
 smiles_input = st.text_input("Enter 2D SMILES:", "CC(C)c1c(c(c(n1CC[C@H](C[C@H](CC(=O)O)O)O)c2ccc(cc2)F)c3ccccc3)C(=O)Nc4ccccc4")
 
-num_conf = st.sidebar.slider("Number of Conformers to Generate", 1, 50, 10)
+# Moved from sidebar to main page for better visibility
+num_conf = st.slider("Select Number of Conformers to Generate", min_value=1, max_value=50, value=10)
 
 if smiles_input:
+    # We pass the num_conf value directly here
     mol, energy_data = generate_conformers(smiles_input, num_conf)
     
     if mol and energy_data:
@@ -60,7 +60,6 @@ if smiles_input:
             st.subheader(f"Results for {len(df)} Unique Conformers")
             st.dataframe(df)
             
-            # CSV Download
             csv = df.to_csv(index=False).encode('utf-8')
             st.download_button(
                 label="Download Energy Data (CSV)",
@@ -73,7 +72,6 @@ if smiles_input:
             
             selected_id = st.selectbox("Select ID for 3D View", df["ID"])
             
-            # PDB Download
             pdb_block = Chem.MolToPDBBlock(mol, confId=int(selected_id))
             st.download_button(
                 label="Download Selected Conformer (PDB)",
@@ -97,7 +95,6 @@ if smiles_input:
             view.addModel(mb, 'mol')
             view.setStyle({'stick': {'radius': 0.15}, 'sphere': {'scale': 0.25}})
             
-            # Add Pharmacophore spheres
             for f in feats:
                 pos = f.GetPos()
                 fam = f.GetFamily()
