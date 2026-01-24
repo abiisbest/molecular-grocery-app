@@ -77,19 +77,11 @@ if mol_ready:
     homo, lumo, gap = estimate_quantum_properties(mol_ready)
     energy_data, mol_final, best_id = generate_conformers(mol_ready, num_conf)
     
-    st.subheader("Electronic Properties & Legend")
+    st.subheader("Electronic Properties")
     q_col1, q_col2, q_col3 = st.columns(3)
     q_col1.metric("HOMO (eV)", homo, help="Highest Occupied Molecular Orbital")
     q_col2.metric("LUMO (eV)", lumo, help="Lowest Unoccupied Molecular Orbital")
     q_col3.metric("Energy Gap (eV)", gap, help="Reactivity Index")
-
-    with st.expander("📊 Click to View Color Legend"):
-        st.markdown("""
-        * 🟡 **Gold/Orange**: **Global Minimum** - The absolute most stable shape with the lowest energy.
-        * 🔴 **Red (HOMO)**: **Nucleophilic Regions** - Electron-rich areas likely to donate electrons.
-        * 🔵 **Blue (LUMO)**: **Electrophilic Regions** - Electron-poor areas likely to accept electrons.
-        * 🟢 **Teal**: **Optimization Trend** - Represents the relative stability across different shapes.
-        """)
 
     st.divider()
 
@@ -101,7 +93,6 @@ if mol_ready:
         st.dataframe(df_pes.style.highlight_min(subset=['Rel_E'], color='teal'), use_container_width=True)
         fig = go.Figure()
         fig.add_trace(go.Scatter(x=df_pes["RMSD"], y=df_pes["Rel_E"], mode='lines+markers', line_color='teal'))
-        # Mark Global Minimum with Gold Star
         fig.add_trace(go.Scatter(x=[0], y=[0], mode='markers', marker=dict(symbol='star', size=15, color='orange'), name='Global Minimum'))
         st.plotly_chart(fig, use_container_width=True)
 
@@ -119,17 +110,31 @@ if mol_ready:
         c2.dataframe(get_internal_coordinates(mol_final, int(sel_id)), use_container_width=True)
 
     with visual_tab:
-        st.write("### 3D Molecular Model")
-        view = py3Dmol.view(width=800, height=500)
-        view.addModel(Chem.MolToMolBlock(mol_final, confId=int(sel_id)), 'mol')
-        view.setStyle({'stick': {'radius': 0.2}, 'sphere': {'scale': 0.3}})
-        view.zoomTo()
-        showmol(view, height=500, width=800)
+        v_col1, v_col2 = st.columns([3, 1])
+        
+        with v_col1:
+            st.write("### 3D Molecular Model")
+            view = py3Dmol.view(width=600, height=500)
+            view.addModel(Chem.MolToMolBlock(mol_final, confId=int(sel_id)), 'mol')
+            view.setStyle({'stick': {'radius': 0.2}, 'sphere': {'scale': 0.3}})
+            view.zoomTo()
+            showmol(view, height=500, width=600)
+            
+        with v_col2:
+            st.write("### Color Legend")
+            st.info("""
+            🟡 **Gold**: **Global Minimum** Most stable shape.
 
-    st.write("### Export Data")
-    st.download_button(
-        label=f"Download Conformer {sel_id} (PDB)",
-        data=Chem.MolToPDBBlock(mol_final, confId=int(sel_id)),
-        file_name=f"ligand_conf_{sel_id}.pdb",
-        mime="chemical/x-pdb"
-    )
+            🔴 **Red (HOMO)**: **Donor Site** Electron-rich area.
+
+            🔵 **Blue (LUMO)**: **Acceptor Site** Electron-poor area.
+
+            🟢 **Teal**: **Energy Trend** Optimization path.
+            """)
+            st.download_button(
+                label=f"Download PDB",
+                data=Chem.MolToPDBBlock(mol_final, confId=int(sel_id)),
+                file_name=f"conformer_{sel_id}.pdb",
+                mime="chemical/x-pdb",
+                use_container_width=True
+            )
