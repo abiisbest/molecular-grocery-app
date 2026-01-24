@@ -32,7 +32,6 @@ def get_internal_coordinates(mol, conf_id):
 def estimate_quantum_properties(mol):
     logp = Descriptors.MolLogP(mol)
     tpsa = Descriptors.TPSA(mol)
-    # Semi-empirical estimation for HOMO/LUMO levels
     homo = -5.5 - (0.1 * logp) + (0.01 * tpsa)
     lumo = -1.2 + (0.05 * logp) - (0.02 * tpsa)
     gap = lumo - homo
@@ -78,11 +77,19 @@ if mol_ready:
     homo, lumo, gap = estimate_quantum_properties(mol_ready)
     energy_data, mol_final, best_id = generate_conformers(mol_ready, num_conf)
     
-    st.subheader("Electronic Properties")
+    st.subheader("Electronic Properties & Legend")
     q_col1, q_col2, q_col3 = st.columns(3)
-    q_col1.metric("HOMO (eV)", homo)
-    q_col2.metric("LUMO (eV)", lumo)
-    q_col3.metric("Energy Gap (eV)", gap)
+    q_col1.metric("HOMO (eV)", homo, help="Highest Occupied Molecular Orbital")
+    q_col2.metric("LUMO (eV)", lumo, help="Lowest Unoccupied Molecular Orbital")
+    q_col3.metric("Energy Gap (eV)", gap, help="Reactivity Index")
+
+    with st.expander("📊 Click to View Color Legend"):
+        st.markdown("""
+        * 🟡 **Gold/Orange**: **Global Minimum** - The absolute most stable shape with the lowest energy.
+        * 🔴 **Red (HOMO)**: **Nucleophilic Regions** - Electron-rich areas likely to donate electrons.
+        * 🔵 **Blue (LUMO)**: **Electrophilic Regions** - Electron-poor areas likely to accept electrons.
+        * 🟢 **Teal**: **Optimization Trend** - Represents the relative stability across different shapes.
+        """)
 
     st.divider()
 
@@ -94,6 +101,8 @@ if mol_ready:
         st.dataframe(df_pes.style.highlight_min(subset=['Rel_E'], color='teal'), use_container_width=True)
         fig = go.Figure()
         fig.add_trace(go.Scatter(x=df_pes["RMSD"], y=df_pes["Rel_E"], mode='lines+markers', line_color='teal'))
+        # Mark Global Minimum with Gold Star
+        fig.add_trace(go.Scatter(x=[0], y=[0], mode='markers', marker=dict(symbol='star', size=15, color='orange'), name='Global Minimum'))
         st.plotly_chart(fig, use_container_width=True)
 
     with geom_tab:
