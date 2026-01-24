@@ -14,6 +14,7 @@ def calculate_binding_affinity(ligand, protein_pdb_str):
     logp = Descriptors.MolLogP(ligand)
     hbd = Lipinski.NumHDonors(ligand)
     hba = Lipinski.NumHAcceptors(ligand)
+    # Empirical affinity scoring weighted for H-bonds and lipophilicity
     affinity = - (1.2 * logp) - (1.5 * hbd) - (0.8 * hba)
     return round(float(affinity), 2)
 
@@ -143,7 +144,18 @@ if mol_ready:
     if protein_data:
         view.addModel(protein_data, 'pdb')
         view.setStyle({'model': 0}, {'cartoon': {'color': 'spectrum'}})
-    view.addModel(Chem.MolToMolBlock(mol_final, confId=int(sel_id)), 'mol')
+    
+    pdb_string = Chem.MolToPDBBlock(mol_final, confId=int(sel_id))
+    view.addModel(pdb_string, 'pdb')
     view.setStyle({'model': 1}, {'stick': {'radius': 0.15}, 'sphere': {'scale': 0.25}})
     view.zoomTo()
     showmol(view, height=500, width=800)
+
+    # Final Download Section
+    st.write("### Export Data")
+    st.download_button(
+        label=f"Download Conformer {sel_id} (PDB)",
+        data=pdb_string,
+        file_name=f"conformer_{sel_id}.pdb",
+        mime="chemical/x-pdb"
+    )
