@@ -11,13 +11,9 @@ st.set_page_config(page_title="Bioinformatics Analysis Platform", layout="wide")
 def calculate_binding_affinity(ligand, protein_pdb_str):
     if not protein_pdb_str:
         return None
-    
     logp = Descriptors.MolLogP(ligand)
     hbd = Lipinski.NumHDonors(ligand)
     hba = Lipinski.NumHAcceptors(ligand)
-    
-    # Revised formula to emphasize Hydrogen Bonding for PBP targets like 5TRO
-    # Negative values indicate favorable binding (Delta G)
     affinity = - (1.2 * logp) - (1.5 * hbd) - (0.8 * hba)
     return round(float(affinity), 2)
 
@@ -45,9 +41,7 @@ def get_internal_coordinates(mol, conf_id):
 def calculate_all_data(mol, protein_pdb=None):
     AllChem.ComputeGasteigerCharges(mol)
     charges = [float(mol.GetAtomWithIdx(i).GetProp('_GasteigerCharge')) for i in range(mol.GetNumAtoms())]
-    
     binding_score = calculate_binding_affinity(mol, protein_pdb)
-    
     data = {
         "Physicochemical": {
             "MW": round(Descriptors.MolWt(mol), 2),
@@ -96,7 +90,6 @@ st.title("Bioinformatics Analysis Platform")
 
 col1, col2 = st.columns(2)
 with col1:
-    # Defaulting to Ampicillin for strong 5TRO binding
     smiles_input = st.text_input("Ligand SMILES:", "CC1([C@@H](N2[C@H](S1)[C@@H](C2=O)NC(=O)[C@@H](C3=CC=CC=C3)N)C(=O)O)C")
 with col2:
     prot_file = st.file_uploader("Target Protein (PDB)", type=["pdb"])
@@ -115,25 +108,42 @@ if mol_ready:
     for i, (k, v) in enumerate(all_data[category].items()):
         m_cols[i].metric(k, v)
 
-    st.subheader("Stability Analysis (Potential Energy Surface)")
-    df_pes = pd.DataFrame(energy_data).sort_values("RMSD")
-    fig = go.Figure()
-    fig.add_trace(go.Scatter(x=df_pes["RMSD"], y=df_pes["Rel_E"], mode='lines+markers', line_color='teal'))
-    fig.update_layout(xaxis_title="RMSD (Å)", yaxis_title="Relative Energy (kcal/mol)", height=400)
-    st.plotly_chart(fig, use_container_width=True)
+    st.divider()
 
+    st.subheader("Structural & Property Analysis")
+    data_tab, geom_tab = st.tabs(["Molecular Data", "Geometric Coordinates"])
+
+    with data_tab:
+        st.write("### Stability Analysis (PES)")
+        df_pes = pd.DataFrame(energy_data).sort_values("RMSD")
+        fig = go.Figure()
+        fig.add_trace(go.Scatter(x=df_pes["RMSD"], y=df_pes["Rel_E"], mode='lines+markers', line_color='teal'))
+        fig.update_layout(xaxis_title="RMSD (Å)", yaxis_title="Relative Energy (kcal/mol)", height=400)
+        st.plotly_chart(fig, use_container_width=True)
+        st.dataframe(pd.DataFrame(energy_data), use_container_width=True)
+
+    with geom_tab:
+        sel_id = st.selectbox("Select ID for Coordinates:", [d["ID"] for d in energy_data])
+        
+        st.write("### Cartesian Coordinates (XYZ)")
+        xyz_block = Chem.MolToXYZBlock(mol_final, confId=int(sel_id))
+        xyz_lines = xyz_block.strip().split('\n')[2:]
+        xyz_data = [line.split() for line in xyz_lines]
+        df_xyz = pd.DataFrame(xyz_data, columns=["Atom", "X", "Y", "Z"])
+        st.dataframe(df_xyz, use_container_width=True)
+        
+        st.divider()
+        
+        st.write("### Internal Coordinates (Z-Matrix)")
+        st.dataframe(get_internal_coordinates(mol_final, int(sel_id)), use_container_width=True)
+
+    st.divider()
     st.subheader("3D Structural Visualization")
-    sel_id = st.selectbox("Select Conformer ID:", [d["ID"] for d in energy_data])
-    
     view = py3Dmol.view(width=800, height=500)
     if protein_data:
         view.addModel(protein_data, 'pdb')
         view.setStyle({'model': 0}, {'cartoon': {'color': 'spectrum'}})
-    
     view.addModel(Chem.MolToMolBlock(mol_final, confId=int(sel_id)), 'mol')
     view.setStyle({'model': 1}, {'stick': {'radius': 0.15}, 'sphere': {'scale': 0.25}})
     view.zoomTo()
     showmol(view, height=500, width=800)
-    
-    with st.expander("Show Geometric Coordinates (Z-Matrix)"):
-        st.dataframe(get_internal_coordinates(mol_final, int(sel_id)), use_container_width=True)
