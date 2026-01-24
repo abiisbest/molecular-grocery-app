@@ -14,7 +14,6 @@ def calculate_binding_affinity(ligand, protein_pdb_str):
     logp = Descriptors.MolLogP(ligand)
     hbd = Lipinski.NumHDonors(ligand)
     hba = Lipinski.NumHAcceptors(ligand)
-    # Empirical affinity scoring weighted for H-bonds and lipophilicity
     affinity = - (1.2 * logp) - (1.5 * hbd) - (0.8 * hba)
     return round(float(affinity), 2)
 
@@ -84,8 +83,16 @@ def generate_conformers(mol, num_conf):
     for d in raw_data:
         rel_e = d["Raw"] - min_e
         rmsd = AllChem.GetConformerRMS(mol, best_id, d["ID"])
-        energy_list.append({"ID": int(d["ID"]), "Energy": round(d["Raw"], 4), "Rel_E": round(rel_e, 4), "RMSD": round(rmsd, 3)})
-    return energy_list, mol
+        # Add a Status label to highlight the most stable one
+        status = "MOST STABLE (Global Minimum)" if d["ID"] == best_id else "Local Minimum"
+        energy_list.append({
+            "ID": int(d["ID"]), 
+            "Energy": round(d["Raw"], 4), 
+            "Rel_E": round(rel_e, 4), 
+            "RMSD": round(rmsd, 3),
+            "Status": status
+        })
+    return energy_list, mol, best_id
 
 st.title("Bioinformatics Analysis Platform")
 
@@ -101,7 +108,7 @@ mol_ready = Chem.MolFromSmiles(smiles_input)
 if mol_ready:
     num_conf = st.sidebar.slider("Conformers", 1, 50, 10)
     all_data = calculate_all_data(mol_ready, protein_data)
-    energy_data, mol_final = generate_conformers(mol_ready, num_conf)
+    energy_data, mol_final, best_id = generate_conformers(mol_ready, num_conf)
     
     st.subheader("Results")
     category = st.selectbox("Select View:", list(all_data.keys()))
@@ -115,16 +122,24 @@ if mol_ready:
     data_tab, geom_tab = st.tabs(["Molecular Data", "Geometric Coordinates"])
 
     with data_tab:
-        st.write("### Stability Analysis (PES)")
+        st.write(f"### Stability Analysis (PES) - Most Stable ID: {best_id}")
         df_pes = pd.DataFrame(energy_data).sort_values("RMSD")
+        
+        # Highlight most stable row in the dataframe
+        st.dataframe(df_pes.style.highlight_min(subset=['Rel_E'], color='teal'), use_container_width=True)
+        
         fig = go.Figure()
-        fig.add_trace(go.Scatter(x=df_pes["RMSD"], y=df_pes["Rel_E"], mode='lines+markers', line_color='teal'))
+        fig.add_trace(go.Scatter(x=df_pes["RMSD"], y=df_pes["Rel_E"], mode='lines+markers', line_color='teal', name="Conformers"))
+        # Add a star for the global minimum
+        fig.add_trace(go.Scatter(x=[0], y=[0], mode='markers', marker=dict(symbol='star', size=15, color='orange'), name="Global Minimum"))
         fig.update_layout(xaxis_title="RMSD (Å)", yaxis_title="Relative Energy (kcal/mol)", height=400)
         st.plotly_chart(fig, use_container_width=True)
-        st.dataframe(pd.DataFrame(energy_data), use_container_width=True)
 
     with geom_tab:
-        sel_id = st.selectbox("Select ID for Coordinates:", [d["ID"] for d in energy_data])
+        sel_id = st.selectbox("Select ID for Coordinates:", [d["ID"] for d in energy_data], index=0)
+        
+        if sel_id == best_id:
+            st.success("You are viewing the MOST STABLE conformer (Global Minimum).")
         
         st.write("### Cartesian Coordinates (XYZ)")
         xyz_block = Chem.MolToXYZBlock(mol_final, confId=int(sel_id))
@@ -151,7 +166,6 @@ if mol_ready:
     view.zoomTo()
     showmol(view, height=500, width=800)
 
-    # Final Download Section
     st.write("### Export Data")
     st.download_button(
         label=f"Download Conformer {sel_id} (PDB)",
