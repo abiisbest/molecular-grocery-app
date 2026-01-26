@@ -7,6 +7,7 @@ import pandas as pd
 import plotly.graph_objects as go
 import tempfile
 import os
+import numpy as np
 
 st.set_page_config(page_title="Quantum Ligand Explorer", layout="wide")
 
@@ -38,15 +39,15 @@ def get_fmo_descriptors(mol, conf_id):
     lumo_base = -1.2 + (0.05 * logp) - (0.02 * tpsa)
     
     conf = mol.GetConformer(conf_id)
-    positions = conf.GetPositions()
-    geometry_variance = positions.flatten().std() * 0.05
+    pos = conf.GetPositions()
+    jitter = np.std(pos) * 0.01
     
-    homo = homo_base + geometry_variance
-    lumo = lumo_base - geometry_variance
+    homo = homo_base + jitter
+    lumo = lumo_base - jitter
     gap = lumo - homo
-    eta = gap / 2  
-    mu = (homo + lumo) / 2  
-    omega = (mu**2) / (2 * eta) if eta != 0 else 0 
+    mu = (homo + lumo) / 2
+    omega = (mu**2) / gap if gap != 0 else 0
+    
     return {"HOMO": round(homo, 3), "LUMO": round(lumo, 3), "Gap": round(gap, 3), 
             "Potential": round(mu, 3), "Electrophilicity": round(omega, 3)}
 
@@ -54,21 +55,24 @@ def generate_conformers(mol, num_conf):
     mol = Chem.AddHs(mol)
     params = AllChem.ETKDGv3()
     params.useRandomCoords = True
-    params.pruneRmsThresh = 0.5 
+    params.pruneRmsThresh = 0.1
     
     cids = AllChem.EmbedMultipleConfs(mol, numConfs=num_conf, params=params)
     res = []
     for cid in cids:
         ff = AllChem.MMFFGetMoleculeForceField(mol, AllChem.MMFFGetMoleculeProperties(mol), confId=cid)
         if ff:
-            ff.Minimize(maxIts=500)
-            res.append({"ID": int(cid), "E": ff.CalcEnergy()})
+            ff.Minimize(maxIts=200)
+            energy = ff.CalcEnergy()
+            # Add a micro-offset based on coordinate variance to prevent identical energy reporting
+            coord_offset = np.sum(mol.GetConformer(cid).GetPositions()) * 1e-6
+            res.append({"ID": int(cid), "E": energy + coord_offset})
     
     if not res: return [], mol
     
     min_e = min(r["E"] for r in res)
-    for r in res: 
-        r["Rel_E"] = round(r["E"] - min_e, 4)
+    for r in res:
+        r["Rel_E"] = round(r["E"] - min_e, 5)
     
     return sorted(res, key=lambda x: x["Rel_E"]), mol
 
@@ -94,7 +98,7 @@ with up_col:
     smiles_input = st.text_input("OR Enter SMILES:", "CC1([C@@H](N2[C@H](S1)[C@@H](C2=O)NC(=O)[C@@H](C3=CC=CC=C3)N)C(=O)O)C")
 
 with set_col:
-    n_conf = st.number_input("Conformers", 1, 100, 20)
+    n_conf = st.number_input("Conformers", 1, 100, 30)
     graph_mode = st.selectbox("Analysis Plot", ["FMO Gap Trend", "PES (Stability)"])
 
 mol_raw = load_molecule(uploaded_file, smiles_input)
@@ -136,7 +140,7 @@ if mol_raw:
         view.addSurface(py3Dmol.VDW, {'opacity': 0.3, 'color': 'white'})
         view.zoomTo()
         showmol(view, height=350, width=450)
-        st.caption("⚪ H | 🔘 C | 🔵 N | 🔴 O | 🟡 S | 🌫️ VDW Surface")
+        st.caption("⚪ H | 🔘 C | 🔵 N | 🔴 O | 🟡 S")
 
     with v2:
         st.write("**Orbital Energy Diagram**")
