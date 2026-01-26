@@ -50,25 +50,24 @@ def get_fmo_descriptors(mol, conf_id):
 
 def generate_conformers(mol, num_conf):
     mol = Chem.AddHs(mol)
-    params = AllChem.ETKDGv3()
-    params.useRandomCoords = True
-    params.pruneRmsThresh = 0.1
-    params.randomSeed = np.random.randint(1, 100000)
-    cids = AllChem.EmbedMultipleConfs(mol, numConfs=num_conf, params=params)
+    cids = AllChem.EmbedMultipleConfs(mol, numConfs=num_conf, randomSeed=42, pruneRmsThresh=0.5)
     res = []
-    for i, cid in enumerate(cids):
-        ff = AllChem.MMFFGetMoleculeForceField(mol, AllChem.MMFFGetMoleculeProperties(mol), confId=cid)
+    
+    prop = AllChem.MMFFGetMoleculeProperties(mol)
+    
+    for cid in cids:
+        ff = AllChem.MMFFGetMoleculeForceField(mol, prop, confId=cid)
         if ff:
-            ff.Minimize(maxIts=500)
-            base_e = ff.CalcEnergy()
-            conf = mol.GetConformer(cid)
-            xyz_variance = np.var(conf.GetPositions())
-            unique_e = base_e + (xyz_variance * 0.01) + (i * 0.001)
-            res.append({"ID": int(cid), "E": unique_e})
+            ff.Minimize(maxIts=1000)
+            energy = ff.CalcEnergy()
+            res.append({"ID": int(cid), "E": energy})
+            
     if not res: return [], mol
+    
     min_e = min(r["E"] for r in res)
     for r in res:
-        r["Rel_E"] = round(r["E"] - min_e, 4)
+        r["Rel_E"] = round(r["E"] - min_e, 6)
+    
     return sorted(res, key=lambda x: x["Rel_E"]), mol
 
 def load_molecule(up_file, smiles_str):
