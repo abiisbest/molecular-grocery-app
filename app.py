@@ -41,11 +41,9 @@ def get_fmo_descriptors(mol, conf_id):
     lumo = lumo_base - shift
     gap = lumo - homo
     eta = gap / 2  
-    s = 1 / eta if eta != 0 else 0 
     mu = (homo + lumo) / 2  
     omega = (mu**2) / (2 * eta) if eta != 0 else 0 
     return {"HOMO": round(homo, 3), "LUMO": round(lumo, 3), "Gap": round(gap, 3), 
-            "Hardness": round(eta, 3), "Softness": round(s, 3), 
             "Potential": round(mu, 3), "Electrophilicity": round(omega, 3)}
 
 def generate_conformers(mol, num_conf):
@@ -111,9 +109,9 @@ if mol_raw:
     q1.metric("HOMO (eV)", fmo["HOMO"])
     q2.metric("LUMO (eV)", fmo["LUMO"])
     q3.metric("Gap (ΔE)", fmo["Gap"])
-    q4.metric("Hardness (η)", fmo["Hardness"])
-    q5.metric("Softness (S)", fmo["Softness"])
-    q6.metric("Electrophilicity (ω)", fmo["Electrophilicity"])
+    q4.metric("Potential (μ)", fmo["Potential"])
+    q5.metric("Electrophilicity (ω)", fmo["Electrophilicity"])
+    q6.metric("Rel. Energy (kcal)", rel_energy)
 
     st.divider()
 
@@ -157,8 +155,8 @@ if mol_raw:
 
     with geo_c1:
         st.write("**Electronic Interpretation**")
-        if fmo['Gap'] > 2.5: st.success(f"ID {sel_id}: High Hardness (Stable)")
-        else: st.warning(f"ID {sel_id}: High Softness (Reactive)")
+        if fmo['Gap'] > 2.5: st.success(f"ID {sel_id}: Stable Energy Gap")
+        else: st.warning(f"ID {sel_id}: High Polarizability Gap")
         st.info(f"Potential (μ): {fmo['Potential']} eV")
         st.info(f"Rel. Energy: {rel_energy} kcal/mol")
 
