@@ -37,17 +37,14 @@ def get_fmo_descriptors(mol, conf_id):
     tpsa = Descriptors.TPSA(mol)
     homo_base = -5.5 - (0.1 * logp) + (0.01 * tpsa)
     lumo_base = -1.2 + (0.05 * logp) - (0.02 * tpsa)
-    
     conf = mol.GetConformer(conf_id)
     pos = conf.GetPositions()
     jitter = np.std(pos) * 0.01
-    
     homo = homo_base + jitter
     lumo = lumo_base - jitter
     gap = lumo - homo
     mu = (homo + lumo) / 2
     omega = (mu**2) / gap if gap != 0 else 0
-    
     return {"HOMO": round(homo, 3), "LUMO": round(lumo, 3), "Gap": round(gap, 3), 
             "Potential": round(mu, 3), "Electrophilicity": round(omega, 3)}
 
@@ -55,25 +52,19 @@ def generate_conformers(mol, num_conf):
     mol = Chem.AddHs(mol)
     params = AllChem.ETKDGv3()
     params.useRandomCoords = True
-    params.pruneRmsThresh = 0.1
-    
+    params.pruneRmsThresh = 0.5
     cids = AllChem.EmbedMultipleConfs(mol, numConfs=num_conf, params=params)
     res = []
     for cid in cids:
         ff = AllChem.MMFFGetMoleculeForceField(mol, AllChem.MMFFGetMoleculeProperties(mol), confId=cid)
         if ff:
-            ff.Minimize(maxIts=200)
+            ff.Minimize(maxIts=500)
             energy = ff.CalcEnergy()
-            # Add a micro-offset based on coordinate variance to prevent identical energy reporting
-            coord_offset = np.sum(mol.GetConformer(cid).GetPositions()) * 1e-6
-            res.append({"ID": int(cid), "E": energy + coord_offset})
-    
+            res.append({"ID": int(cid), "E": energy})
     if not res: return [], mol
-    
     min_e = min(r["E"] for r in res)
     for r in res:
-        r["Rel_E"] = round(r["E"] - min_e, 5)
-    
+        r["Rel_E"] = round(r["E"] - min_e, 4)
     return sorted(res, key=lambda x: x["Rel_E"]), mol
 
 def load_molecule(up_file, smiles_str):
@@ -96,7 +87,6 @@ up_col, set_col = st.columns([2, 1])
 with up_col:
     uploaded_file = st.file_uploader("Upload Molecule (SDF, PDB, MOL2)", type=["sdf", "pdb", "mol2"])
     smiles_input = st.text_input("OR Enter SMILES:", "CC1([C@@H](N2[C@H](S1)[C@@H](C2=O)NC(=O)[C@@H](C3=CC=CC=C3)N)C(=O)O)C")
-
 with set_col:
     n_conf = st.number_input("Conformers", 1, 100, 30)
     graph_mode = st.selectbox("Analysis Plot", ["FMO Gap Trend", "PES (Stability)"])
@@ -121,13 +111,12 @@ if mol_raw:
     rel_energy = next(item["Rel_E"] for item in conf_data if item["ID"] == sel_id)
 
     st.markdown("### 2. Conformer-Specific Quantum Metrics")
-    q1, q2, q3, q4, q5, q6 = st.columns(6)
+    q1, q2, q3, q4, q5 = st.columns(5)
     q1.metric("HOMO (eV)", fmo["HOMO"])
     q2.metric("LUMO (eV)", fmo["LUMO"])
     q3.metric("Gap (ΔE)", fmo["Gap"])
     q4.metric("Potential (μ)", fmo["Potential"])
-    q5.metric("Electrophilicity (ω)", fmo["Electrophilicity"])
-    q6.metric("Rel. Energy (kcal)", rel_energy)
+    q5.metric("Rel. Energy (kcal)", rel_energy)
 
     st.divider()
 
@@ -168,21 +157,12 @@ if mol_raw:
         st.plotly_chart(fig, use_container_width=True)
 
     st.divider()
-    st.markdown("### 3. Researcher's Notes & Coordinate Mapping")
-    geo_c1, geo_c2, geo_c3 = st.columns([1, 1.2, 1])
-
+    st.markdown("### 3. Coordinate Mapping")
+    geo_c1, geo_c2 = st.columns(2)
     with geo_c1:
-        st.write("**Electronic Interpretation**")
-        if fmo['Gap'] > 2.5: st.success(f"ID {sel_id}: Stable Energy Gap")
-        else: st.warning(f"ID {sel_id}: High Polarizability Gap")
-        st.info(f"Potential (μ): {fmo['Potential']} eV")
-        st.info(f"Rel. Energy: {rel_energy} kcal/mol")
-
-    with geo_c2:
         st.write("**Internal Coordinates (Z-Matrix)**")
         st.dataframe(get_internal_coordinates(mol_hs, sel_id), use_container_width=True, height=250)
-
-    with geo_c3:
+    with geo_c2:
         st.write("**Cartesian (XYZ)**")
         xyz_block = Chem.MolToXYZBlock(mol_hs, confId=sel_id).split('\n')[2:]
         xyz_data = [line.split() for line in xyz_block if line.strip()]
