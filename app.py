@@ -36,9 +36,13 @@ def get_fmo_descriptors(mol, conf_id):
     tpsa = Descriptors.TPSA(mol)
     homo_base = -5.5 - (0.1 * logp) + (0.01 * tpsa)
     lumo_base = -1.2 + (0.05 * logp) - (0.02 * tpsa)
-    shift = (conf_id * 0.005) 
-    homo = homo_base + shift
-    lumo = lumo_base - shift
+    
+    conf = mol.GetConformer(conf_id)
+    positions = conf.GetPositions()
+    geometry_variance = positions.flatten().std() * 0.05
+    
+    homo = homo_base + geometry_variance
+    lumo = lumo_base - geometry_variance
     gap = lumo - homo
     eta = gap / 2  
     mu = (homo + lumo) / 2  
@@ -48,16 +52,24 @@ def get_fmo_descriptors(mol, conf_id):
 
 def generate_conformers(mol, num_conf):
     mol = Chem.AddHs(mol)
-    AllChem.EmbedMultipleConfs(mol, numConfs=num_conf, params=AllChem.ETKDGv3())
+    params = AllChem.ETKDGv3()
+    params.useRandomCoords = True
+    params.pruneRmsThresh = 0.5 
+    
+    cids = AllChem.EmbedMultipleConfs(mol, numConfs=num_conf, params=params)
     res = []
-    for cid in range(mol.GetNumConformers()):
+    for cid in cids:
         ff = AllChem.MMFFGetMoleculeForceField(mol, AllChem.MMFFGetMoleculeProperties(mol), confId=cid)
         if ff:
-            ff.Minimize()
-            res.append({"ID": cid, "E": ff.CalcEnergy()})
+            ff.Minimize(maxIts=500)
+            res.append({"ID": int(cid), "E": ff.CalcEnergy()})
+    
     if not res: return [], mol
+    
     min_e = min(r["E"] for r in res)
-    for r in res: r["Rel_E"] = round(r["E"] - min_e, 4)
+    for r in res: 
+        r["Rel_E"] = round(r["E"] - min_e, 4)
+    
     return sorted(res, key=lambda x: x["Rel_E"]), mol
 
 def load_molecule(up_file, smiles_str):
@@ -138,14 +150,16 @@ if mol_raw:
     with v3:
         st.write("**Analysis Plot**")
         if graph_mode == "FMO Gap Trend":
-            gaps = [get_fmo_descriptors(mol_hs, cid)["Gap"] for cid in sorted_ids]
-            fig = go.Figure(data=go.Scatter(x=list(range(len(gaps))), y=gaps, mode='lines+markers', line_color='orange'))
-            fig.add_trace(go.Scatter(x=[sorted_ids.index(sel_id)], y=[fmo['Gap']], mode='markers', marker=dict(color='red', size=10, symbol='star')))
+            gaps_data = [get_fmo_descriptors(mol_hs, cid)["Gap"] for cid in sorted_ids]
+            fig = go.Figure(data=go.Scatter(x=list(range(len(gaps_data))), y=gaps_data, mode='lines+markers', line_color='orange'))
+            current_idx = sorted_ids.index(sel_id)
+            fig.add_trace(go.Scatter(x=[current_idx], y=[fmo['Gap']], mode='markers', marker=dict(color='red', size=10, symbol='star')))
             fig.update_layout(height=350, xaxis_title="Stability Rank", yaxis_title="Gap (eV)", showlegend=False)
         else:
             df_pes = pd.DataFrame(conf_data)
             fig = go.Figure(data=go.Scatter(x=list(range(len(df_pes))), y=df_pes['Rel_E'], mode='lines+markers', line_color='teal'))
-            fig.add_trace(go.Scatter(x=[sorted_ids.index(sel_id)], y=[rel_energy], mode='markers', marker=dict(color='red', size=10, symbol='star')))
+            current_idx = sorted_ids.index(sel_id)
+            fig.add_trace(go.Scatter(x=[current_idx], y=[rel_energy], mode='markers', marker=dict(color='red', size=10, symbol='star')))
             fig.update_layout(height=350, xaxis_title="Stability Rank", yaxis_title="ΔE (kcal/mol)", showlegend=False)
         st.plotly_chart(fig, use_container_width=True)
 
