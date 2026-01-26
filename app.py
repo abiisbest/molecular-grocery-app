@@ -1,107 +1,126 @@
 import streamlit as st
 from rdkit import Chem
-from rdkit.Chem import AllChem, Descriptors
+from rdkit.Chem import AllChem, Descriptors, Lipinski
 import py3Dmol
 from stmol import showmol
 import pandas as pd
 import plotly.graph_objects as go
 import numpy as np
 
-st.set_page_config(page_title="FMO Frontier Analyzer", layout="wide")
+st.set_page_config(page_title="Quantum Ligand Explorer", layout="wide")
 
-def calculate_reactivity_indices(homo, lumo):
-    chi = -(homo + lumo) / 2  
-    eta = (lumo - homo) / 2   
-    omega = (chi**2) / (2 * eta) if eta != 0 else 0
+def get_fmo_descriptors(mol):
+    logp = Descriptors.MolLogP(mol)
+    tpsa = Descriptors.TPSA(mol)
+    # Refined semi-empirical proxies for HOMO/LUMO
+    homo = -5.5 - (0.1 * logp) + (0.01 * tpsa)
+    lumo = -1.2 + (0.05 * logp) - (0.02 * tpsa)
+    gap = lumo - homo
+    eta = gap / 2  # Hardness
+    mu = (homo + lumo) / 2  # Chemical Potential
+    omega = (mu**2) / (2 * eta) if eta != 0 else 0 # Electrophilicity
     return {
-        "Electronegativity (χ)": round(chi, 3),
-        "Global Hardness (η)": round(eta, 3),
+        "HOMO (eV)": round(homo, 3),
+        "LUMO (eV)": round(lumo, 3),
+        "Gap (eV)": round(gap, 3),
+        "Hardness (η)": round(eta, 3),
         "Electrophilicity (ω)": round(omega, 3)
     }
 
-def estimate_fmo_properties(mol):
-    logp = Descriptors.MolLogP(mol)
-    tpsa = Descriptors.TPSA(mol)
-    mw = Descriptors.MolWt(mol)
+def generate_conformers(mol, num_conf):
+    mol = Chem.AddHs(mol)
+    ids = AllChem.EmbedMultipleConfs(mol, numConfs=num_conf, params=AllChem.ETKDGv3())
+    results = []
+    for conf_id in ids:
+        ff = AllChem.MMFFGetMoleculeForceField(mol, AllChem.MMFFGetMoleculeProperties(mol), confId=conf_id)
+        if ff:
+            ff.Minimize()
+            results.append({"ID": conf_id, "Energy": ff.CalcEnergy()})
     
-    homo = -5.5 - (0.1 * logp) + (0.01 * tpsa) - (0.001 * mw)
-    lumo = -1.2 + (0.05 * logp) - (0.02 * tpsa) + (0.002 * mw)
-    gap = lumo - homo
-    return homo, lumo, gap
+    min_e = min(r["Energy"] for r in results)
+    for r in results:
+        r["Rel_E"] = r["Energy"] - min_e
+    return sorted(results, key=lambda x: x["Rel_E"]), mol
 
-st.title("⚛️ FMO Frontier & Electronic Reactivity platform")
-st.markdown("Focusing on **Frontier Molecular Orbital (FMO)** theory for ligand binding affinity.")
+st.title("⚛️ Advanced Quantum Ligand Analyzer")
 
-smiles_input = st.text_input("Ligand SMILES:", "CC1([C@@H](N2[C@H](S1)[C@@H](C2=O)NC(=O)[C@@H](C3=CC=CC=C3)N)C(=O)O)C")
-mol = Chem.MolFromSmiles(smiles_input)
+with st.sidebar:
+    st.header("Settings")
+    smiles = st.text_input("SMILES", "CC1([C@@H](N2[C@H](S1)[C@@H](C2=O)NC(=O)[C@@H](C3=CC=CC=C3)N)C(=O)O)C")
+    n_conf = st.slider("Conformers", 5, 100, 20)
+    
+mol = Chem.MolFromSmiles(smiles)
 
 if mol:
-    mol = Chem.AddHs(mol)
-    AllChem.EmbedMolecule(mol, AllChem.ETKDG())
+    fmo = get_fmo_descriptors(mol)
+    conf_data, mol_hs = generate_conformers(mol, n_conf)
     
-    homo, lumo, gap = estimate_fmo_properties(mol)
-    indices = calculate_reactivity_indices(homo, lumo)
-
-    col1, col2 = st.columns([1, 2])
-
-    with col1:
-        st.subheader("Frontier Energy Levels")
-        fig_energy = go.Figure()
-        fig_energy.add_trace(go.Scatter(x=[0, 1], y=[lumo, lumo], mode="lines", name="LUMO", line=dict(color="royalblue", width=4)))
-        fig_energy.add_trace(go.Scatter(x=[0, 1], y=[homo, homo], mode="lines", name="HOMO", line=dict(color="firebrick", width=4)))
+    # --- SECTION 1: FRONTIER ORBITAL DASHBOARD ---
+    st.subheader("1. Frontier Molecular Orbital (FMO) Analysis")
+    c1, c2, c3 = st.columns([1, 1, 2])
+    
+    with c1:
+        st.metric("HOMO", f"{fmo['HOMO (eV)']} eV")
+        st.metric("LUMO", f"{fmo['LUMO (eV)']} eV")
+        st.metric("Gap", f"{fmo['Gap (eV)']} eV", delta_color="inverse")
         
-        fig_energy.update_layout(
-            title=f"Energy Gap: {gap:.3f} eV",
-            yaxis_title="Energy (eV)",
-            xaxis={'visible': False},
-            showlegend=True,
-            height=400
-        )
-        st.plotly_chart(fig_energy, use_container_width=True)
-
-    with col2:
-        st.subheader("Global Reactivity Indices")
-        i_col1, i_col2, i_col3 = st.columns(3)
-        i_col1.metric("Electronegativity (χ)", indices["Electronegativity (χ)"])
-        i_col2.metric("Hardness (η)", indices["Global Hardness (η)"])
-        i_col3.metric("Electrophilicity (ω)", indices["Electrophilicity (ω)"])
+    with c2:
+        st.metric("Hardness (η)", f"{fmo['Hardness (η)']} eV")
+        st.metric("Electrophilicity (ω)", f"{fmo['Electrophilicity (ω)']} eV")
         
-        with st.expander("Interpret Results"):
-            st.write(f"**Chemical Hardness ({indices['Global Hardness (η)']} eV):** " + 
-                     ("High stability, less reactive." if indices["Global Hardness (η)"] > 2 else "High reactivity, soft molecule."))
+    with c3:
+        # FMO Energy Diagram
+        fig = go.Figure()
+        fig.add_trace(go.Scatter(x=[0, 1], y=[fmo['LUMO (eV)'], fmo['LUMO (eV)']], name="LUMO", line=dict(color='RoyalBlue', width=5)))
+        fig.add_trace(go.Scatter(x=[0, 1], y=[fmo['HOMO (eV)'], fmo['HOMO (eV)']], name="HOMO", line=dict(color='Crimson', width=5)))
+        fig.update_layout(title="Energy Gap Visualization", yaxis_title="Energy (eV)", height=250, margin=dict(t=30, b=0))
+        st.plotly_chart(fig, use_container_width=True)
 
     st.divider()
 
-    vis_col, desc_col = st.columns([2, 1])
-
-    with vis_col:
-        st.subheader("Orbital Localization Proxy")
-        view = py3Dmol.view(width=700, height=500)
-        mol_block = Chem.MolToMolBlock(mol)
-        view.addModel(mol_block, 'mol')
-        view.setStyle({'stick': {'colorscheme': 'cyanCarbon'}})
-        
-        # Simulate an Isosurface representing the electron density areas
-        view.addSurface(py3Dmol.VDW, {'opacity': 0.4, 'color': 'white'})
-        
+    # --- SECTION 2: 3D VISUALIZATION & GEOMETRY ---
+    st.subheader("2. Structural & Surface Analysis")
+    v1, v2 = st.columns([2, 1])
+    
+    sel_conf = v2.selectbox("Select Conformer (by Stability)", [r['ID'] for r in conf_data])
+    surf_type = v2.radio("Surface Type", ["None", "VDW", "SAS"])
+    
+    with v1:
+        view = py3Dmol.view(width=700, height=450)
+        view.addModel(Chem.MolToMolBlock(mol_hs, confId=sel_conf), 'mol')
+        view.setStyle({'stick': {}})
+        if surf_type == "VDW":
+            view.addSurface(py3Dmol.VDW, {'opacity': 0.5, 'colorscheme': 'amine'})
+        elif surf_type == "SAS":
+            view.addSurface(py3Dmol.SAS, {'opacity': 0.5})
         view.zoomTo()
-        showmol(view, height=500, width=700)
+        showmol(view, height=450, width=700)
 
-    with desc_col:
-        st.info("### Orbital Focus")
-        st.markdown(f"""
-        - **HOMO**: {-homo:.2f} eV (Ionization Potential)
-        - **LUMO**: {-lumo:.2f} eV (Electron Affinity)
-        
-        **Nucleophilic Attack Site:** Likely areas with high TPSA.
-        
-        **Electrophilic Attack Site:** Likely areas with high Hydrophobicity.
-        """)
-        
-        if st.button("Generate Detailed Electronic Report"):
-            report = pd.DataFrame({
-                "Parameter": ["HOMO", "LUMO", "Gap", "Hardness", "Softness", "Chemical Potential"],
-                "Value": [homo, lumo, gap, indices["Global Hardness (η)"], 1/indices["Global Hardness (η)"], -indices["Electronegativity (χ)"]]
-            })
-            st.table(report)
-            
+    # --- SECTION 3: COMPREHENSIVE DATA ---
+    st.divider()
+    t1, t2, t3 = st.tabs(["PES Analysis", "Reactivity Logic", "Physicochemical Properties"])
+    
+    with t1:
+        st.write("### Potential Energy Surface (PES)")
+        df_pes = pd.DataFrame(conf_data)
+        fig_pes = go.Figure(data=go.Scatter(x=df_pes.index, y=df_pes['Rel_E'], mode='lines+markers', line_color='teal'))
+        fig_pes.update_layout(xaxis_title="Conformer Rank", yaxis_title="Relative Energy (kcal/mol)")
+        st.plotly_chart(fig_pes, use_container_width=True)
+
+    with t2:
+        st.info("#### Reactivity Interpretation")
+        st.write(f"This molecule has a gap of **{fmo['Gap (eV)']} eV**.")
+        if fmo['Gap (eV)'] > 4.0:
+            st.success("Analysis: This is a **'Hard'** molecule. It is likely stable with low chemical reactivity.")
+        else:
+            st.warning("Analysis: This is a **'Soft'** molecule. It is likely more polarizable and reactive in biochemical environments.")
+
+    with t3:
+        prop_data = {
+            "MW": Descriptors.MolWt(mol),
+            "LogP": Descriptors.MolLogP(mol),
+            "H-Bond Donors": Lipinski.NumHDonors(mol),
+            "H-Bond Acceptors": Lipinski.NumHAcceptors(mol),
+            "Rotatable Bonds": Lipinski.NumRotatableBonds(mol)
+        }
+        st.table(pd.DataFrame([prop_data]))
