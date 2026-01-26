@@ -68,7 +68,6 @@ def load_molecule(up_file, smiles_str):
         with tempfile.NamedTemporaryFile(delete=False, suffix=f".{ext}") as tmp:
             tmp.write(up_file.getvalue())
             tmp_path = tmp.name
-        
         if ext == 'pdb': mol = Chem.MolFromPDBFile(tmp_path)
         elif ext == 'sdf': mol = next(Chem.SDMolSupplier(tmp_path), None)
         elif ext == 'mol2': mol = Chem.MolFromMol2File(tmp_path)
@@ -94,7 +93,7 @@ if mol_raw:
     conf_data, mol_hs = generate_conformers(mol_raw, n_conf)
     sorted_ids = [r['ID'] for r in conf_data]
     
-    st.markdown("### 1. Physicochemical & Structural Selection")
+    st.markdown("### 1. Physicochemical Profile")
     b1, b2, b3, b4, b5, b6 = st.columns(6)
     b1.metric("MW", round(Descriptors.MolWt(mol_raw), 2))
     b2.metric("LogP", round(Descriptors.MolLogP(mol_raw), 2))
