@@ -67,10 +67,10 @@ def generate_conformers(mol, num_conf):
             base_energy = ff.CalcEnergy()
             
             conf = mol.GetConformer(cid)
-            coord_sum = np.sum(np.abs(conf.GetPositions()))
-            unique_offset = (coord_sum * 1e-4) + (i * 1e-3)
+            coord_noise = np.sum(np.abs(conf.GetPositions())) * 1e-4
+            unique_energy = base_energy + coord_noise + (i * 1e-3)
             
-            res.append({"ID": int(cid), "E": base_energy + unique_offset})
+            res.append({"ID": int(cid), "E": unique_energy})
     
     if not res: return [], mol
     
@@ -143,7 +143,7 @@ if mol_raw:
         view.addSurface(py3Dmol.VDW, {'opacity': 0.3, 'color': 'white'})
         view.zoomTo()
         showmol(view, height=350, width=450)
-        st.caption("⚪ H | 🔘 C | 🔵 N | 🔴 O | 🟡 S | 🌫️ VDW Surface")
+        st.caption("⚪ H | 🔘 C | 🔵 N | 🔴 O | 🟡 S")
 
     with v2:
         st.write("**Orbital Energy Diagram**")
