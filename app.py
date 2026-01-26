@@ -38,11 +38,13 @@ def get_fmo_descriptors(mol, conf_id):
     homo = homo_base + shift
     lumo = lumo_base - shift
     gap = lumo - homo
-    eta = gap / 2  
-    mu = (homo + lumo) / 2  
+    eta = gap / 2  # Hardness
+    s = 1 / eta if eta != 0 else 0 # Softness
+    mu = (homo + lumo) / 2  # Chemical Potential
     omega = (mu**2) / (2 * eta) if eta != 0 else 0 
     return {"HOMO": round(homo, 3), "LUMO": round(lumo, 3), "Gap": round(gap, 3), 
-            "Hardness": round(eta, 3), "Electrophilicity": round(omega, 3)}
+            "Hardness": round(eta, 3), "Softness": round(s, 3), 
+            "Potential": round(mu, 3), "Electrophilicity": round(omega, 3)}
 
 def generate_conformers(mol, num_conf):
     mol = Chem.AddHs(mol)
@@ -58,7 +60,7 @@ def generate_conformers(mol, num_conf):
     for r in res: r["Rel_E"] = round(r["E"] - min_e, 4)
     return sorted(res, key=lambda x: x["Rel_E"]), mol
 
-st.title("⚛️ Advanced Quantum Ligand Analyzer")
+st.title("⚛️ Advanced Quantum FMO Analyzer")
 
 top_c1, top_c2 = st.columns([3, 1])
 smiles = top_c1.text_input("Ligand SMILES:", "CC1([C@@H](N2[C@H](S1)[C@@H](C2=O)NC(=O)[C@@H](C3=CC=CC=C3)N)C(=O)O)C")
@@ -79,7 +81,7 @@ if mol:
     b5.metric("H-Acceptors", Lipinski.NumHAcceptors(mol))
     b6.metric("Rot. Bonds", Lipinski.NumRotatableBonds(mol))
 
-    st.markdown("### 2. Structural Selection & Quantum Metrics")
+    st.markdown("### 2. Structural Selection & FMO Metrics")
     sel_id = st.selectbox("Active Conformer ID (Ranked: Stable → Unstable)", sorted_ids)
     
     fmo = get_fmo_descriptors(mol_hs, sel_id)
@@ -90,8 +92,8 @@ if mol:
     q2.metric("LUMO (eV)", fmo["LUMO"])
     q3.metric("Gap (ΔE)", fmo["Gap"])
     q4.metric("Hardness (η)", fmo["Hardness"])
-    q5.metric("Electrophilicity (ω)", fmo["Electrophilicity"])
-    q6.metric("Rel. Energy (kcal)", rel_energy)
+    q5.metric("Softness (S)", fmo["Softness"])
+    q6.metric("Electrophilicity (ω)", fmo["Electrophilicity"])
 
     st.divider()
 
@@ -99,52 +101,49 @@ if mol:
 
     with v1:
         st.write("**3D Geometric Surface**")
-        view = py3Dmol.view(width=450, height=400)
+        view = py3Dmol.view(width=450, height=350)
         view.addModel(Chem.MolToMolBlock(mol_hs, confId=sel_id), 'mol')
         view.setStyle({'stick': {'radius': 0.2}, 'sphere': {'scale': 0.3}})
         view.addSurface(py3Dmol.VDW, {'opacity': 0.3, 'color': 'white'})
         view.zoomTo()
-        showmol(view, height=400, width=450)
-        
-        # Color Legend Block
-        st.caption("🔍 **3D Color Legend (CPK Standards):**")
-        st.markdown("""
-        <div style="font-size: 0.85rem; line-height: 1.4;">
-        ⚪ <b>White</b>: Hydrogen | 🔘 <b>Grey</b>: Carbon | 🔵 <b>Blue</b>: Nitrogen | 🔴 <b>Red</b>: Oxygen | 🟡 <b>Yellow</b>: Sulfur<br>
-        🌫️ <b>White Mesh</b>: Van der Waals Surface (Molecular Volume/Cloud)
-        </div>
-        """, unsafe_allow_html=True)
+        showmol(view, height=350, width=450)
+        st.caption("⚪ H | 🔘 C | 🔵 N | 🔴 O | 🟡 S")
 
     with v2:
         st.write("**Orbital Energy Diagram**")
         fig_gap = go.Figure()
         fig_gap.add_trace(go.Scatter(x=[0, 1], y=[fmo['LUMO'], fmo['LUMO']], name="LUMO", line=dict(color='RoyalBlue', width=6)))
         fig_gap.add_trace(go.Scatter(x=[0, 1], y=[fmo['HOMO'], fmo['HOMO']], name="HOMO", line=dict(color='Crimson', width=6)))
-        fig_gap.add_annotation(x=0.5, y=(fmo['HOMO'] + fmo['LUMO'])/2, text=f"ΔE = {fmo['Gap']} eV", showarrow=False, font=dict(color="white", size=14))
-        fig_gap.add_shape(type="line", x0=0.5, y0=fmo['HOMO'], x1=0.5, y1=fmo['LUMO'], line=dict(color="gray", width=2, dash="dash"))
-        fig_gap.update_layout(yaxis_title="Energy (eV)", height=400, showlegend=False, margin=dict(l=20, r=20, t=10, b=10))
+        fig_gap.add_annotation(x=0.5, y=(fmo['HOMO'] + fmo['LUMO'])/2, text=f"ΔE={fmo['Gap']}eV", showarrow=False, font=dict(color="white"))
+        fig_gap.update_layout(yaxis_title="Energy (eV)", height=350, showlegend=False, margin=dict(l=20, r=20, t=10, b=10))
         st.plotly_chart(fig_gap, use_container_width=True)
 
     with v3:
-        st.write("**Stability Position (PES)**")
-        df_pes = pd.DataFrame(conf_data)
-        fig_pes = go.Figure(data=go.Scatter(x=list(range(len(df_pes))), y=df_pes['Rel_E'], mode='lines+markers', line_color='teal'))
-        current_rank = sorted_ids.index(sel_id)
-        fig_pes.add_trace(go.Scatter(x=[current_rank], y=[rel_energy], mode='markers', marker=dict(color='red', size=12, symbol='star')))
-        fig_pes.update_layout(xaxis_title="Stability Rank", yaxis_title="ΔE (kcal/mol)", height=400, showlegend=False, margin=dict(l=20, r=20, t=10, b=10))
-        st.plotly_chart(fig_pes, use_container_width=True)
+        st.write("**Researcher's Note**")
+        if fmo['Gap'] > 2.5:
+            st.success(f"**Chemical Hardness High:** Conformer {sel_id} is electronically stable and resistant to polarizability.")
+        else:
+            st.warning(f"**Chemical Softness High:** Conformer {sel_id} has a narrow gap, suggesting high reactivity or potential binding flexibility.")
+        st.info(f"**Chemical Potential (μ):** {fmo['Potential']} eV. Higher potential indicates a stronger tendency for electrons to leave the system.")
 
     st.divider()
-    
-    st.markdown("### 3. Coordinate Systems")
-    geo_c1, geo_c2 = st.columns(2)
-    
+
+    st.markdown("### 3. FMO Trend & Coordinate Mapping")
+    geo_c1, geo_c2, geo_c3 = st.columns([1.2, 1.2, 1])
+
     with geo_c1:
-        st.write("**Cartesian Coordinates (XYZ)**")
-        xyz_block = Chem.MolToXYZBlock(mol_hs, confId=sel_id).split('\n')[2:]
-        xyz_data = [line.split() for line in xyz_block if line.strip()]
-        st.dataframe(pd.DataFrame(xyz_data, columns=["Atom", "X", "Y", "Z"]), use_container_width=True, height=300)
-        
+        st.write("**FMO Gap Trend (Across All Conformers)**")
+        gaps = [get_fmo_descriptors(mol_hs, cid)["Gap"] for cid in sorted_ids]
+        fig_trend = go.Figure(data=go.Scatter(x=list(range(len(gaps))), y=gaps, mode='lines+markers', line_color='orange'))
+        fig_trend.update_layout(height=300, xaxis_title="Stability Rank", yaxis_title="Gap (eV)", margin=dict(l=10,r=10,t=10,b=10))
+        st.plotly_chart(fig_trend, use_container_width=True)
+
     with geo_c2:
         st.write("**Internal Coordinates (Z-Matrix)**")
         st.dataframe(get_internal_coordinates(mol_hs, sel_id), use_container_width=True, height=300)
+
+    with geo_c3:
+        st.write("**Cartesian (XYZ)**")
+        xyz_block = Chem.MolToXYZBlock(mol_hs, confId=sel_id).split('\n')[2:]
+        xyz_data = [line.split() for line in xyz_block if line.strip()]
+        st.dataframe(pd.DataFrame(xyz_data, columns=["Atom", "X", "Y", "Z"]), use_container_width=True, height=300)
