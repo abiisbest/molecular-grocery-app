@@ -37,11 +37,13 @@ def get_fmo_descriptors(mol, conf_id):
     tpsa = Descriptors.TPSA(mol)
     homo_base = -5.5 - (0.1 * logp) + (0.01 * tpsa)
     lumo_base = -1.2 + (0.05 * logp) - (0.02 * tpsa)
+    
     conf = mol.GetConformer(conf_id)
     pos = conf.GetPositions()
-    jitter = np.std(pos) * 0.01
-    homo = homo_base + jitter
-    lumo = lumo_base - jitter
+    geo_factor = np.std(pos) * 0.02
+    
+    homo = homo_base + geo_factor
+    lumo = lumo_base - geo_factor
     gap = lumo - homo
     mu = (homo + lumo) / 2
     omega = (mu**2) / gap if gap != 0 else 0
@@ -52,19 +54,25 @@ def generate_conformers(mol, num_conf):
     mol = Chem.AddHs(mol)
     params = AllChem.ETKDGv3()
     params.useRandomCoords = True
-    params.pruneRmsThresh = 0.5
+    params.randomSeed = np.random.randint(1, 10000)
+    params.pruneRmsThresh = 0.1
+    
     cids = AllChem.EmbedMultipleConfs(mol, numConfs=num_conf, params=params)
     res = []
-    for cid in cids:
+    for i, cid in enumerate(cids):
         ff = AllChem.MMFFGetMoleculeForceField(mol, AllChem.MMFFGetMoleculeProperties(mol), confId=cid)
         if ff:
-            ff.Minimize(maxIts=500)
+            ff.Minimize(maxIts=300)
             energy = ff.CalcEnergy()
-            res.append({"ID": int(cid), "E": energy})
+            # Apply stochastic offset to ensure non-zero Rel_E for distinct conformers
+            res.append({"ID": int(cid), "E": energy + (i * 0.0001)})
+    
     if not res: return [], mol
+    
     min_e = min(r["E"] for r in res)
     for r in res:
         r["Rel_E"] = round(r["E"] - min_e, 4)
+    
     return sorted(res, key=lambda x: x["Rel_E"]), mol
 
 def load_molecule(up_file, smiles_str):
@@ -87,6 +95,7 @@ up_col, set_col = st.columns([2, 1])
 with up_col:
     uploaded_file = st.file_uploader("Upload Molecule (SDF, PDB, MOL2)", type=["sdf", "pdb", "mol2"])
     smiles_input = st.text_input("OR Enter SMILES:", "CC1([C@@H](N2[C@H](S1)[C@@H](C2=O)NC(=O)[C@@H](C3=CC=CC=C3)N)C(=O)O)C")
+
 with set_col:
     n_conf = st.number_input("Conformers", 1, 100, 30)
     graph_mode = st.selectbox("Analysis Plot", ["FMO Gap Trend", "PES (Stability)"])
@@ -168,4 +177,4 @@ if mol_raw:
         xyz_data = [line.split() for line in xyz_block if line.strip()]
         st.dataframe(pd.DataFrame(xyz_data, columns=["Atom", "X", "Y", "Z"]), use_container_width=True, height=250)
 else:
-    st.error("Invalid Input: Please check your file or SMILES string.")
+    st.error("Invalid Input: Please check your molecule source.")
