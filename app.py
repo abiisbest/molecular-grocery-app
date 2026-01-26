@@ -1,6 +1,6 @@
 import streamlit as st
 from rdkit import Chem
-from rdkit.Chem import AllChem, Descriptors
+from rdkit.Chem import AllChem, Descriptors, Lipinski
 import py3Dmol
 from stmol import showmol
 import pandas as pd
@@ -34,7 +34,6 @@ def get_fmo_descriptors(mol, conf_id):
     tpsa = Descriptors.TPSA(mol)
     homo_base = -5.5 - (0.1 * logp) + (0.01 * tpsa)
     lumo_base = -1.2 + (0.05 * logp) - (0.02 * tpsa)
-    
     shift = (conf_id * 0.005) 
     homo = homo_base + shift
     lumo = lumo_base - shift
@@ -42,7 +41,6 @@ def get_fmo_descriptors(mol, conf_id):
     eta = gap / 2  
     mu = (homo + lumo) / 2  
     omega = (mu**2) / (2 * eta) if eta != 0 else 0 
-    
     return {"HOMO": round(homo, 3), "LUMO": round(lumo, 3), "Gap": round(gap, 3), 
             "Hardness": round(eta, 3), "Electrophilicity": round(omega, 3)}
 
@@ -60,7 +58,7 @@ def generate_conformers(mol, num_conf):
     for r in res: r["Rel_E"] = round(r["E"] - min_e, 4)
     return sorted(res, key=lambda x: x["Rel_E"]), mol
 
-st.title("⚛️ Advanced Quantum FMO Analyzer")
+st.title("⚛️ Advanced Quantum Ligand Analyzer")
 
 top_c1, top_c2 = st.columns([3, 1])
 smiles = top_c1.text_input("Ligand SMILES:", "CC1([C@@H](N2[C@H](S1)[C@@H](C2=O)NC(=O)[C@@H](C3=CC=CC=C3)N)C(=O)O)C")
@@ -72,20 +70,28 @@ if mol:
     conf_data, mol_hs = generate_conformers(mol, n_conf)
     sorted_ids = [r['ID'] for r in conf_data]
     
-    st.markdown("### 1. Structural Selection & Stability Rank")
+    st.markdown("### 1. Basic Physicochemical Profile")
+    b1, b2, b3, b4, b5, b6 = st.columns(6)
+    b1.metric("Mol Weight", round(Descriptors.MolWt(mol), 2))
+    b2.metric("LogP", round(Descriptors.MolLogP(mol), 2))
+    b3.metric("TPSA", round(Descriptors.TPSA(mol), 2))
+    b4.metric("H-Donors", Lipinski.NumHDonors(mol))
+    b5.metric("H-Acceptors", Lipinski.NumHAcceptors(mol))
+    b6.metric("Rot. Bonds", Lipinski.NumRotatableBonds(mol))
+
+    st.markdown("### 2. Structural Selection & Quantum Metrics")
     sel_id = st.selectbox("Active Conformer ID (Ranked: Stable → Unstable)", sorted_ids)
     
     fmo = get_fmo_descriptors(mol_hs, sel_id)
     rel_energy = next(item["Rel_E"] for item in conf_data if item["ID"] == sel_id)
 
-    st.markdown("### 2. Conformer-Specific Quantum Metrics")
-    m1, m2, m3, m4, m5, m6 = st.columns(6)
-    m1.metric("HOMO (eV)", fmo["HOMO"])
-    m2.metric("LUMO (eV)", fmo["LUMO"])
-    m3.metric("Gap (ΔE)", fmo["Gap"])
-    m4.metric("Hardness (η)", fmo["Hardness"])
-    m5.metric("Electrophilicity (ω)", fmo["Electrophilicity"])
-    m6.metric("Rel. Energy (kcal)", rel_energy)
+    q1, q2, q3, q4, q5, q6 = st.columns(6)
+    q1.metric("HOMO (eV)", fmo["HOMO"])
+    q2.metric("LUMO (eV)", fmo["LUMO"])
+    q3.metric("Gap (ΔE)", fmo["Gap"])
+    q4.metric("Hardness (η)", fmo["Hardness"])
+    q5.metric("Electrophilicity (ω)", fmo["Electrophilicity"])
+    q6.metric("Rel. Energy (kcal)", rel_energy)
 
     st.divider()
 
