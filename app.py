@@ -5,6 +5,8 @@ import py3Dmol
 from stmol import showmol
 import pandas as pd
 import plotly.graph_objects as go
+import tempfile
+import os
 
 st.set_page_config(page_title="Quantum Ligand Explorer", layout="wide")
 
@@ -60,30 +62,48 @@ def generate_conformers(mol, num_conf):
     for r in res: r["Rel_E"] = round(r["E"] - min_e, 4)
     return sorted(res, key=lambda x: x["Rel_E"]), mol
 
+def load_molecule(up_file, smiles_str):
+    if up_file is not None:
+        ext = up_file.name.split('.')[-1].lower()
+        with tempfile.NamedTemporaryFile(delete=False, suffix=f".{ext}") as tmp:
+            tmp.write(up_file.getvalue())
+            tmp_path = tmp.name
+        
+        if ext == 'pdb': mol = Chem.MolFromPDBFile(tmp_path)
+        elif ext == 'sdf': mol = next(Chem.SDMolSupplier(tmp_path), None)
+        elif ext == 'mol2': mol = Chem.MolFromMol2File(tmp_path)
+        else: mol = None
+        os.unlink(tmp_path)
+        return mol
+    return Chem.MolFromSmiles(smiles_str)
+
 st.title("⚛️ Advanced Quantum FMO Analyzer")
 
-top_c1, top_c2, top_c3 = st.columns([3, 1, 1])
-smiles = top_c1.text_input("Ligand SMILES:", "CC1([C@@H](N2[C@H](S1)[C@@H](C2=O)NC(=O)[C@@H](C3=CC=CC=C3)N)C(=O)O)C")
-n_conf = top_c2.number_input("Conformers", 1, 100, 20)
-graph_mode = top_c3.selectbox("Analysis Plot", ["FMO Gap Trend", "PES (Stability)"])
+up_col, set_col = st.columns([2, 1])
+with up_col:
+    uploaded_file = st.file_uploader("Upload Molecule (SDF, PDB, MOL2)", type=["sdf", "pdb", "mol2"])
+    smiles_input = st.text_input("OR Enter SMILES:", "CC1([C@@H](N2[C@H](S1)[C@@H](C2=O)NC(=O)[C@@H](C3=CC=CC=C3)N)C(=O)O)C")
 
-mol = Chem.MolFromSmiles(smiles)
+with set_col:
+    n_conf = st.number_input("Conformers", 1, 100, 20)
+    graph_mode = st.selectbox("Analysis Plot", ["FMO Gap Trend", "PES (Stability)"])
 
-if mol:
-    conf_data, mol_hs = generate_conformers(mol, n_conf)
+mol_raw = load_molecule(uploaded_file, smiles_input)
+
+if mol_raw:
+    conf_data, mol_hs = generate_conformers(mol_raw, n_conf)
     sorted_ids = [r['ID'] for r in conf_data]
     
     st.markdown("### 1. Physicochemical & Structural Selection")
     b1, b2, b3, b4, b5, b6 = st.columns(6)
-    b1.metric("MW", round(Descriptors.MolWt(mol), 2))
-    b2.metric("LogP", round(Descriptors.MolLogP(mol), 2))
-    b3.metric("TPSA", round(Descriptors.TPSA(mol), 2))
-    b4.metric("H-Donors", Lipinski.NumHDonors(mol))
-    b5.metric("H-Acceptors", Lipinski.NumHAcceptors(mol))
-    b6.metric("Rot. Bonds", Lipinski.NumRotatableBonds(mol))
+    b1.metric("MW", round(Descriptors.MolWt(mol_raw), 2))
+    b2.metric("LogP", round(Descriptors.MolLogP(mol_raw), 2))
+    b3.metric("TPSA", round(Descriptors.TPSA(mol_raw), 2))
+    b4.metric("H-Donors", Lipinski.NumHDonors(mol_raw))
+    b5.metric("H-Acceptors", Lipinski.NumHAcceptors(mol_raw))
+    b6.metric("Rot. Bonds", Lipinski.NumRotatableBonds(mol_raw))
 
     sel_id = st.selectbox("Active Conformer ID (Ranked by Stability)", sorted_ids)
-    
     fmo = get_fmo_descriptors(mol_hs, sel_id)
     rel_energy = next(item["Rel_E"] for item in conf_data if item["ID"] == sel_id)
 
@@ -99,7 +119,6 @@ if mol:
     st.divider()
 
     v1, v2, v3 = st.columns([1.5, 1, 1])
-
     with v1:
         st.write("**3D Geometric Surface**")
         view = py3Dmol.view(width=450, height=350)
@@ -125,25 +144,22 @@ if mol:
             gaps = [get_fmo_descriptors(mol_hs, cid)["Gap"] for cid in sorted_ids]
             fig = go.Figure(data=go.Scatter(x=list(range(len(gaps))), y=gaps, mode='lines+markers', line_color='orange'))
             fig.add_trace(go.Scatter(x=[sorted_ids.index(sel_id)], y=[fmo['Gap']], mode='markers', marker=dict(color='red', size=10, symbol='star')))
-            fig.update_layout(height=350, xaxis_title="Stability Rank", yaxis_title="Gap (eV)", showlegend=False, margin=dict(l=10,r=10,t=10,b=10))
+            fig.update_layout(height=350, xaxis_title="Stability Rank", yaxis_title="Gap (eV)", showlegend=False)
         else:
             df_pes = pd.DataFrame(conf_data)
             fig = go.Figure(data=go.Scatter(x=list(range(len(df_pes))), y=df_pes['Rel_E'], mode='lines+markers', line_color='teal'))
             fig.add_trace(go.Scatter(x=[sorted_ids.index(sel_id)], y=[rel_energy], mode='markers', marker=dict(color='red', size=10, symbol='star')))
-            fig.update_layout(height=350, xaxis_title="Stability Rank", yaxis_title="ΔE (kcal/mol)", showlegend=False, margin=dict(l=10,r=10,t=10,b=10))
+            fig.update_layout(height=350, xaxis_title="Stability Rank", yaxis_title="ΔE (kcal/mol)", showlegend=False)
         st.plotly_chart(fig, use_container_width=True)
 
     st.divider()
-
     st.markdown("### 3. Researcher's Notes & Coordinate Mapping")
     geo_c1, geo_c2, geo_c3 = st.columns([1, 1.2, 1])
 
     with geo_c1:
         st.write("**Electronic Interpretation**")
-        if fmo['Gap'] > 2.5:
-            st.success(f"ID {sel_id}: High Hardness (Stable)")
-        else:
-            st.warning(f"ID {sel_id}: High Softness (Reactive)")
+        if fmo['Gap'] > 2.5: st.success(f"ID {sel_id}: High Hardness (Stable)")
+        else: st.warning(f"ID {sel_id}: High Softness (Reactive)")
         st.info(f"Potential (μ): {fmo['Potential']} eV")
         st.info(f"Rel. Energy: {rel_energy} kcal/mol")
 
@@ -156,3 +172,5 @@ if mol:
         xyz_block = Chem.MolToXYZBlock(mol_hs, confId=sel_id).split('\n')[2:]
         xyz_data = [line.split() for line in xyz_block if line.strip()]
         st.dataframe(pd.DataFrame(xyz_data, columns=["Atom", "X", "Y", "Z"]), use_container_width=True, height=250)
+else:
+    st.error("Invalid Input: Please check your file or SMILES string.")
