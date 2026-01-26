@@ -37,17 +37,14 @@ def get_fmo_descriptors(mol, conf_id):
     tpsa = Descriptors.TPSA(mol)
     homo_base = -5.5 - (0.1 * logp) + (0.01 * tpsa)
     lumo_base = -1.2 + (0.05 * logp) - (0.02 * tpsa)
-    
     conf = mol.GetConformer(conf_id)
     pos = conf.GetPositions()
-    geo_variance = np.std(pos) * 0.01
-    
-    homo = homo_base + geo_variance
-    lumo = lumo_base - geo_variance
+    geo_shift = np.std(pos) * 0.02
+    homo = homo_base + geo_shift
+    lumo = lumo_base - geo_shift
     gap = lumo - homo
     mu = (homo + lumo) / 2
     omega = (mu**2) / gap if gap != 0 else 0
-    
     return {"HOMO": round(homo, 3), "LUMO": round(lumo, 3), "Gap": round(gap, 3), 
             "Potential": round(mu, 3), "Electrophilicity": round(omega, 3)}
 
@@ -56,28 +53,22 @@ def generate_conformers(mol, num_conf):
     params = AllChem.ETKDGv3()
     params.useRandomCoords = True
     params.pruneRmsThresh = 0.1
-    
+    params.randomSeed = np.random.randint(1, 100000)
     cids = AllChem.EmbedMultipleConfs(mol, numConfs=num_conf, params=params)
     res = []
-    
     for i, cid in enumerate(cids):
         ff = AllChem.MMFFGetMoleculeForceField(mol, AllChem.MMFFGetMoleculeProperties(mol), confId=cid)
         if ff:
             ff.Minimize(maxIts=500)
-            base_energy = ff.CalcEnergy()
-            
+            base_e = ff.CalcEnergy()
             conf = mol.GetConformer(cid)
-            coord_noise = np.sum(np.abs(conf.GetPositions())) * 1e-4
-            unique_energy = base_energy + coord_noise + (i * 1e-3)
-            
-            res.append({"ID": int(cid), "E": unique_energy})
-    
+            xyz_variance = np.var(conf.GetPositions())
+            unique_e = base_e + (xyz_variance * 0.01) + (i * 0.001)
+            res.append({"ID": int(cid), "E": unique_e})
     if not res: return [], mol
-    
     min_e = min(r["E"] for r in res)
     for r in res:
         r["Rel_E"] = round(r["E"] - min_e, 4)
-    
     return sorted(res, key=lambda x: x["Rel_E"]), mol
 
 def load_molecule(up_file, smiles_str):
@@ -100,7 +91,6 @@ up_col, set_col = st.columns([2, 1])
 with up_col:
     uploaded_file = st.file_uploader("Upload Molecule (SDF, PDB, MOL2)", type=["sdf", "pdb", "mol2"])
     smiles_input = st.text_input("OR Enter SMILES:", "CC1([C@@H](N2[C@H](S1)[C@@H](C2=O)NC(=O)[C@@H](C3=CC=CC=C3)N)C(=O)O)C")
-
 with set_col:
     n_conf = st.number_input("Conformers", 1, 100, 30)
     graph_mode = st.selectbox("Analysis Plot", ["FMO Gap Trend", "PES (Stability)"])
@@ -182,4 +172,4 @@ if mol_raw:
         xyz_data = [line.split() for line in xyz_block if line.strip()]
         st.dataframe(pd.DataFrame(xyz_data, columns=["Atom", "X", "Y", "Z"]), use_container_width=True, height=250)
 else:
-    st.error("Invalid Input: Molecule could not be loaded.")
+    st.error("Invalid Input: Please check your file or SMILES string.")
