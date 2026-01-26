@@ -28,8 +28,9 @@ def generate_conformers(mol, num_conf):
         if ff:
             ff.Minimize()
             res.append({"ID": cid, "E": ff.CalcEnergy()})
+    if not res: return [], mol
     min_e = min(r["E"] for r in res)
-    for r in res: r["Rel_E"] = r["E"] - min_e
+    for r in res: r["Rel_E"] = round(r["E"] - min_e, 4)
     return sorted(res, key=lambda x: x["Rel_E"]), mol
 
 st.title("⚛️ Quantum FMO Analyzer")
@@ -44,7 +45,6 @@ if mol:
     fmo = get_fmo_descriptors(mol)
     conf_data, mol_hs = generate_conformers(mol, n_conf)
     
-    st.markdown("### 1. Unified Electronic & FMO Metrics")
     m1, m2, m3, m4, m5, m6 = st.columns(6)
     m1.metric("HOMO (eV)", fmo["HOMO"])
     m2.metric("LUMO (eV)", fmo["LUMO"])
@@ -55,11 +55,13 @@ if mol:
 
     st.divider()
 
-    st.markdown("### 2. Structural Dynamics & Orbital Visualization")
     v1, v2, v3 = st.columns([1.5, 1, 1])
 
     with v1:
-        sel_id = st.selectbox("Active Conformer ID", [r['ID'] for r in conf_data])
+        # Sorted IDs: Most stable (lowest Rel_E) to least stable
+        sorted_ids = [r['ID'] for r in conf_data]
+        sel_id = st.selectbox("Active Conformer ID (Ranked by Stability)", sorted_ids)
+        
         view = py3Dmol.view(width=450, height=400)
         view.addModel(Chem.MolToMolBlock(mol_hs, confId=sel_id), 'mol')
         view.setStyle({'stick': {'radius': 0.2}, 'sphere': {'scale': 0.3}})
@@ -76,15 +78,16 @@ if mol:
 
     with v3:
         df_pes = pd.DataFrame(conf_data)
-        fig_pes = go.Figure(data=go.Scatter(x=df_pes['ID'], y=df_pes['Rel_E'], mode='lines+markers', line_color='teal'))
-        fig_pes.update_layout(title="PES (Rel. Energy)", yaxis_title="kcal/mol", height=400, margin=dict(l=20, r=20, t=40, b=20))
+        fig_pes = go.Figure(data=go.Scatter(x=list(range(len(df_pes))), y=df_pes['Rel_E'], mode='lines+markers', line_color='teal'))
+        fig_pes.update_layout(title="PES (Stability Trend)", xaxis_title="Stability Rank", yaxis_title="ΔE (kcal/mol)", height=400, margin=dict(l=20, r=20, t=40, b=20))
         st.plotly_chart(fig_pes, use_container_width=True)
 
     st.divider()
     
-    st.markdown("### 3. Comprehensive Data Grid")
     d1, d2 = st.columns(2)
     with d1:
-        st.dataframe(pd.DataFrame([fmo]), use_container_width=True)
+        st.write("**Frontier Orbital Indices**")
+        st.dataframe(pd.DataFrame([fmo]), use_container_width=True, hide_index=True)
     with d2:
-        st.dataframe(pd.DataFrame(conf_data).head(5), use_container_width=True)
+        st.write("**Conformer Energy Table (Sorted)**")
+        st.dataframe(df_pes, use_container_width=True, hide_index=True)
