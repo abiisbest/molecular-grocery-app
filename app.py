@@ -1,6 +1,6 @@
 import streamlit as st
 from rdkit import Chem
-from rdkit.Chem import AllChem, Descriptors, Lipinski
+from rdkit.Chem import AllChem, Descriptors
 import py3Dmol
 from stmol import showmol
 import pandas as pd
@@ -8,31 +8,43 @@ import plotly.graph_objects as go
 
 st.set_page_config(page_title="Quantum Ligand Explorer", layout="wide")
 
-def get_fmo_descriptors(mol, conf_id):
+def get_internal_coordinates(mol, conf_id):
     conf = mol.GetConformer(conf_id)
+    atoms = mol.GetAtoms()
+    z_matrix = []
+    for i in range(len(atoms)):
+        if i == 0:
+            z_matrix.append([atoms[i].GetSymbol(), "", "", ""])
+        elif i == 1:
+            dist = AllChem.GetBondLength(conf, 0, 1)
+            z_matrix.append([atoms[i].GetSymbol(), f"{dist:.3f}", "", ""])
+        elif i == 2:
+            dist = AllChem.GetBondLength(conf, 1, 2)
+            ang = AllChem.GetAngleDeg(conf, 0, 1, 2)
+            z_matrix.append([atoms[i].GetSymbol(), f"{dist:.3f}", f"{ang:.2f}", ""])
+        else:
+            dist = AllChem.GetBondLength(conf, i-1, i)
+            ang = AllChem.GetAngleDeg(conf, i-2, i-1, i)
+            dih = AllChem.GetDihedralDeg(conf, i-3, i-2, i-1, i)
+            z_matrix.append([atoms[i].GetSymbol(), f"{dist:.3f}", f"{ang:.2f}", f"{dih:.2f}"])
+    return pd.DataFrame(z_matrix, columns=["Atom", "Dist (Å)", "Angle (°)", "Dihedral (°)"])
+
+def get_fmo_descriptors(mol, conf_id):
     logp = Descriptors.MolLogP(mol)
     tpsa = Descriptors.TPSA(mol)
-    
     homo_base = -5.5 - (0.1 * logp) + (0.01 * tpsa)
     lumo_base = -1.2 + (0.05 * logp) - (0.02 * tpsa)
     
-    # Simulated geometry-dependent shift based on conformer ID
     shift = (conf_id * 0.005) 
     homo = homo_base + shift
     lumo = lumo_base - shift
-    
     gap = lumo - homo
     eta = gap / 2  
     mu = (homo + lumo) / 2  
     omega = (mu**2) / (2 * eta) if eta != 0 else 0 
     
-    return {
-        "HOMO": round(homo, 3), 
-        "LUMO": round(lumo, 3), 
-        "Gap": round(gap, 3), 
-        "Hardness": round(eta, 3), 
-        "Electrophilicity": round(omega, 3)
-    }
+    return {"HOMO": round(homo, 3), "LUMO": round(lumo, 3), "Gap": round(gap, 3), 
+            "Hardness": round(eta, 3), "Electrophilicity": round(omega, 3)}
 
 def generate_conformers(mol, num_conf):
     mol = Chem.AddHs(mol)
@@ -93,11 +105,8 @@ if mol:
         fig_gap = go.Figure()
         fig_gap.add_trace(go.Scatter(x=[0, 1], y=[fmo['LUMO'], fmo['LUMO']], name="LUMO", line=dict(color='RoyalBlue', width=6)))
         fig_gap.add_trace(go.Scatter(x=[0, 1], y=[fmo['HOMO'], fmo['HOMO']], name="HOMO", line=dict(color='Crimson', width=6)))
-        
-        # Enhanced Gap Annotation
         fig_gap.add_annotation(x=0.5, y=(fmo['HOMO'] + fmo['LUMO'])/2, text=f"ΔE = {fmo['Gap']} eV", showarrow=False, font=dict(color="white", size=14))
         fig_gap.add_shape(type="line", x0=0.5, y0=fmo['HOMO'], x1=0.5, y1=fmo['LUMO'], line=dict(color="gray", width=2, dash="dash"))
-        
         fig_gap.update_layout(yaxis_title="Energy (eV)", height=400, showlegend=False, margin=dict(l=20, r=20, t=10, b=10))
         st.plotly_chart(fig_gap, use_container_width=True)
 
@@ -105,18 +114,22 @@ if mol:
         st.write("**Stability Position (PES)**")
         df_pes = pd.DataFrame(conf_data)
         fig_pes = go.Figure(data=go.Scatter(x=list(range(len(df_pes))), y=df_pes['Rel_E'], mode='lines+markers', line_color='teal'))
-        # Highlight current selection
         current_rank = sorted_ids.index(sel_id)
-        fig_pes.add_trace(go.Scatter(x=[current_rank], y=[rel_energy], mode='markers', marker=dict(color='red', size=12, symbol='star'), name="Selected"))
-        
+        fig_pes.add_trace(go.Scatter(x=[current_rank], y=[rel_energy], mode='markers', marker=dict(color='red', size=12, symbol='star')))
         fig_pes.update_layout(xaxis_title="Stability Rank", yaxis_title="ΔE (kcal/mol)", height=400, showlegend=False, margin=dict(l=20, r=20, t=10, b=10))
         st.plotly_chart(fig_pes, use_container_width=True)
 
     st.divider()
     
-    st.markdown("### 3. Detailed Data Analytics")
-    d1, d2 = st.columns(2)
-    with d1:
-        st.dataframe(pd.DataFrame([fmo]), use_container_width=True, hide_index=True)
-    with d2:
-        st.dataframe(df_pes, use_container_width=True, hide_index=True)
+    st.markdown("### 3. Coordinate Systems")
+    geo_c1, geo_c2 = st.columns(2)
+    
+    with geo_c1:
+        st.write("**Cartesian Coordinates (XYZ)**")
+        xyz_block = Chem.MolToXYZBlock(mol_hs, confId=sel_id).split('\n')[2:]
+        xyz_data = [line.split() for line in xyz_block if line.strip()]
+        st.dataframe(pd.DataFrame(xyz_data, columns=["Atom", "X", "Y", "Z"]), use_container_width=True, height=300)
+        
+    with geo_c2:
+        st.write("**Internal Coordinates (Z-Matrix)**")
+        st.dataframe(get_internal_coordinates(mol_hs, sel_id), use_container_width=True, height=300)
