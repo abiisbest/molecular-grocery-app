@@ -105,6 +105,15 @@ if mol:
         view.addSurface(py3Dmol.VDW, {'opacity': 0.3, 'color': 'white'})
         view.zoomTo()
         showmol(view, height=400, width=450)
+        
+        # Color Legend Block
+        st.caption("🔍 **3D Color Legend (CPK Standards):**")
+        st.markdown("""
+        <div style="font-size: 0.85rem; line-height: 1.4;">
+        ⚪ <b>White</b>: Hydrogen | 🔘 <b>Grey</b>: Carbon | 🔵 <b>Blue</b>: Nitrogen | 🔴 <b>Red</b>: Oxygen | 🟡 <b>Yellow</b>: Sulfur<br>
+        🌫️ <b>White Mesh</b>: Van der Waals Surface (Molecular Volume/Cloud)
+        </div>
+        """, unsafe_allow_html=True)
 
     with v2:
         st.write("**Orbital Energy Diagram**")
