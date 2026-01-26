@@ -20,7 +20,7 @@ def get_internal_coordinates(mol, conf_id):
             z_matrix.append([atoms[i].GetSymbol(), "", "", ""])
         elif i == 1:
             dist = AllChem.GetBondLength(conf, 0, 1)
-            z_matrix.append([atoms[i].GetSymbol(), f"{dist:.3f}", f"", ""])
+            z_matrix.append([atoms[i].GetSymbol(), f"{dist:.3f}", "", ""])
         elif i == 2:
             dist = AllChem.GetBondLength(conf, 1, 2)
             ang = AllChem.GetAngleDeg(conf, 0, 1, 2)
@@ -52,22 +52,24 @@ def generate_conformers(mol, num_conf):
     mol = Chem.AddHs(mol)
     params = AllChem.ETKDGv3()
     params.useRandomCoords = True
-    params.pruneRmsThresh = 0.01 
-    params.randomSeed = np.random.randint(1, 100000)
+    params.pruneRmsThresh = 1.0  
+    params.randomSeed = np.random.randint(1, 1000000)
+    
     cids = AllChem.EmbedMultipleConfs(mol, numConfs=num_conf, params=params)
     res = []
-    for i, cid in enumerate(cids):
+    for cid in cids:
         ff = AllChem.MMFFGetMoleculeForceField(mol, AllChem.MMFFGetMoleculeProperties(mol), confId=cid)
         if ff:
-            ff.Minimize(maxIts=500)
-            base_energy = ff.CalcEnergy()
-            # Force non-zero Relative Energy using a unique structural offset
-            structural_offset = (i * 0.0025) + (np.random.random() * 0.001)
-            res.append({"ID": int(cid), "E": base_energy + structural_offset})
+            ff.Minimize(maxIts=1000)
+            energy = ff.CalcEnergy()
+            res.append({"ID": int(cid), "E": energy})
+            
     if not res: return [], mol
+    
     min_e = min(r["E"] for r in res)
     for r in res:
         r["Rel_E"] = round(r["E"] - min_e, 6)
+    
     return sorted(res, key=lambda x: x["Rel_E"]), mol
 
 def load_molecule(up_file, smiles_str):
@@ -91,7 +93,7 @@ with up_col:
     uploaded_file = st.file_uploader("Upload Molecule (SDF, PDB, MOL2)", type=["sdf", "pdb", "mol2"])
     smiles_input = st.text_input("OR Enter SMILES:", "CC1([C@@H](N2[C@H](S1)[C@@H](C2=O)NC(=O)[C@@H](C3=CC=CC=C3)N)C(=O)O)C")
 with set_col:
-    n_conf = st.number_input("Conformers", 1, 100, 30)
+    n_conf = st.number_input("Conformers", 1, 100, 50)
     graph_mode = st.selectbox("Analysis Plot", ["FMO Gap Trend", "PES (Stability)"])
 
 mol_raw = load_molecule(uploaded_file, smiles_input)
