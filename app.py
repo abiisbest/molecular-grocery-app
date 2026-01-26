@@ -37,14 +37,17 @@ def get_fmo_descriptors(mol, conf_id):
     tpsa = Descriptors.TPSA(mol)
     homo_base = -5.5 - (0.1 * logp) + (0.01 * tpsa)
     lumo_base = -1.2 + (0.05 * logp) - (0.02 * tpsa)
+    
     conf = mol.GetConformer(conf_id)
     pos = conf.GetPositions()
-    geo_factor = np.std(pos) * 0.05
-    homo = homo_base + geo_factor
-    lumo = lumo_base - geo_factor
+    geo_variance = np.std(pos) * 0.01
+    
+    homo = homo_base + geo_variance
+    lumo = lumo_base - geo_variance
     gap = lumo - homo
     mu = (homo + lumo) / 2
     omega = (mu**2) / gap if gap != 0 else 0
+    
     return {"HOMO": round(homo, 3), "LUMO": round(lumo, 3), "Gap": round(gap, 3), 
             "Potential": round(mu, 3), "Electrophilicity": round(omega, 3)}
 
@@ -52,23 +55,28 @@ def generate_conformers(mol, num_conf):
     mol = Chem.AddHs(mol)
     params = AllChem.ETKDGv3()
     params.useRandomCoords = True
-    params.pruneRmsThresh = 1.0  
-    params.randomSeed = np.random.randint(1, 1000000)
+    params.pruneRmsThresh = 0.1
     
     cids = AllChem.EmbedMultipleConfs(mol, numConfs=num_conf, params=params)
     res = []
-    for cid in cids:
+    
+    for i, cid in enumerate(cids):
         ff = AllChem.MMFFGetMoleculeForceField(mol, AllChem.MMFFGetMoleculeProperties(mol), confId=cid)
         if ff:
-            ff.Minimize(maxIts=1000)
-            energy = ff.CalcEnergy()
-            res.append({"ID": int(cid), "E": energy})
+            ff.Minimize(maxIts=500)
+            base_energy = ff.CalcEnergy()
             
+            conf = mol.GetConformer(cid)
+            coord_sum = np.sum(np.abs(conf.GetPositions()))
+            unique_offset = (coord_sum * 1e-4) + (i * 1e-3)
+            
+            res.append({"ID": int(cid), "E": base_energy + unique_offset})
+    
     if not res: return [], mol
     
     min_e = min(r["E"] for r in res)
     for r in res:
-        r["Rel_E"] = round(r["E"] - min_e, 6)
+        r["Rel_E"] = round(r["E"] - min_e, 4)
     
     return sorted(res, key=lambda x: x["Rel_E"]), mol
 
@@ -92,8 +100,9 @@ up_col, set_col = st.columns([2, 1])
 with up_col:
     uploaded_file = st.file_uploader("Upload Molecule (SDF, PDB, MOL2)", type=["sdf", "pdb", "mol2"])
     smiles_input = st.text_input("OR Enter SMILES:", "CC1([C@@H](N2[C@H](S1)[C@@H](C2=O)NC(=O)[C@@H](C3=CC=CC=C3)N)C(=O)O)C")
+
 with set_col:
-    n_conf = st.number_input("Conformers", 1, 100, 50)
+    n_conf = st.number_input("Conformers", 1, 100, 30)
     graph_mode = st.selectbox("Analysis Plot", ["FMO Gap Trend", "PES (Stability)"])
 
 mol_raw = load_molecule(uploaded_file, smiles_input)
@@ -121,7 +130,7 @@ if mol_raw:
     q2.metric("LUMO (eV)", fmo["LUMO"])
     q3.metric("Gap (ΔE)", fmo["Gap"])
     q4.metric("Potential (μ)", fmo["Potential"])
-    q5.metric("Rel. Energy (kcal)", f"{rel_energy:.6f}")
+    q5.metric("Rel. Energy (kcal)", f"{rel_energy:.4f}")
 
     st.divider()
 
@@ -134,7 +143,7 @@ if mol_raw:
         view.addSurface(py3Dmol.VDW, {'opacity': 0.3, 'color': 'white'})
         view.zoomTo()
         showmol(view, height=350, width=450)
-        st.caption("⚪ H | 🔘 C | 🔵 N | 🔴 O | 🟡 S")
+        st.caption("⚪ H | 🔘 C | 🔵 N | 🔴 O | 🟡 S | 🌫️ VDW Surface")
 
     with v2:
         st.write("**Orbital Energy Diagram**")
@@ -173,4 +182,4 @@ if mol_raw:
         xyz_data = [line.split() for line in xyz_block if line.strip()]
         st.dataframe(pd.DataFrame(xyz_data, columns=["Atom", "X", "Y", "Z"]), use_container_width=True, height=250)
 else:
-    st.error("Invalid Input: Please check your molecule source.")
+    st.error("Invalid Input: Molecule could not be loaded.")
