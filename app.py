@@ -84,7 +84,7 @@ def load_molecule(up_file, smiles_str):
         return mol
     return Chem.MolFromSmiles(smiles_str)
 
-st.title("⚛️ Advanced Quantum FMO Analyzer")
+st.title("⚛️ Molecular Reactivity & Conformer Explorer")
 
 up_col, set_col = st.columns([2, 1])
 with up_col:
