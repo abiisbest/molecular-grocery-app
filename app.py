@@ -9,7 +9,7 @@ import tempfile
 import os
 import numpy as np
 
-st.set_page_config(page_title="Quantum Ligand Explorer", layout="wide")
+st.set_page_config(page_title="Molecular Reactivity & Conformer Explorer", layout="wide")
 
 def get_internal_coordinates(mol, conf_id):
     conf = mol.GetConformer(conf_id)
