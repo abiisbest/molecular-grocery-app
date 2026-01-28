@@ -20,11 +20,11 @@ def get_internal_coordinates(mol, conf_id):
             z_matrix.append([atoms[i].GetSymbol(), "", "", ""])
         elif i == 1:
             dist = AllChem.GetBondLength(conf, 0, 1)
-            z_matrix.append([atoms[i].GetSymbol(), f"{dist:.3f}", f"", f""])
+            z_matrix.append([atoms[i].GetSymbol(), f"{dist:.3f}", "", ""])
         elif i == 2:
             dist = AllChem.GetBondLength(conf, 1, 2)
             ang = AllChem.GetAngleDeg(conf, 0, 1, 2)
-            z_matrix.append([atoms[i].GetSymbol(), f"{dist:.3f}", f"{ang:.2f}", f""])
+            z_matrix.append([atoms[i].GetSymbol(), f"{dist:.3f}", f"{ang:.2f}", ""])
         else:
             dist = AllChem.GetBondLength(conf, i-1, i)
             ang = AllChem.GetAngleDeg(conf, i-2, i-1, i)
@@ -83,49 +83,35 @@ def make_orbital_cube(mol, conf_id, orbital_type="HOMO"):
     conf = mol.GetConformer(conf_id)
     pos = conf.GetPositions()
     n_atoms = mol.GetNumAtoms()
-    
     min_bounds = pos.min(axis=0) - 5
     max_bounds = pos.max(axis=0) + 5
     grid_res = 30
-    x = np.linspace(min_bounds[0], max_bounds[0], grid_res)
-    y = np.linspace(min_bounds[1], max_bounds[1], grid_res)
-    z = np.linspace(min_bounds[2], max_bounds[2], grid_res)
-    
+    x, y, z = [np.linspace(min_bounds[i], max_bounds[i], grid_res) for i in range(3)]
     X, Y, Z = np.meshgrid(x, y, z, indexing='ij')
     grid_data = np.zeros_like(X)
-    
     for i in range(n_atoms):
         atom = mol.GetAtomWithIdx(i)
         atom_pos = pos[i]
         symbol = atom.GetSymbol()
-        
-        # Logic to differentiate HOMO (Nucleophilic/Heteroatoms) and LUMO (Electrophilic/Carbons)
         if orbital_type == "HOMO":
-            weight = 2.0 if symbol in ['N', 'O', 'S', 'P'] else 0.2
+            weight = 2.2 if symbol in ['N', 'O', 'S', 'P'] else 0.3
             phase = 1 if i % 2 == 0 else -1
         else:
-            weight = 2.0 if symbol in ['C', 'F', 'Cl', 'B'] else 0.2
+            weight = 2.2 if symbol in ['C', 'F', 'Cl', 'B'] else 0.3
             phase = -1 if i % 2 == 0 else 1
-            
         dist_sq = (X - atom_pos[0])**2 + (Y - atom_pos[1])**2 + (Z - atom_pos[2])**2
-        grid_data += phase * weight * np.exp(-dist_sq / 2.5)
-        
-    cube_header = f"Orbital Cube\n{orbital_type} Distribution\n{n_atoms} {min_bounds[0]} {min_bounds[1]} {min_bounds[2]}\n"
-    cube_header += f"{grid_res} {(max_bounds[0]-min_bounds[0])/(grid_res-1)} 0 0\n"
-    cube_header += f"{grid_res} 0 {(max_bounds[1]-min_bounds[1])/(grid_res-1)} 0\n"
-    cube_header += f"{grid_res} 0 0 {(max_bounds[2]-min_bounds[2])/(grid_res-1)}\n"
-    
+        grid_data += phase * weight * np.exp(-dist_sq / 2.8)
+    header = f"Orbital\nGenerated\n{n_atoms} {min_bounds[0]} {min_bounds[1]} {min_bounds[2]}\n"
+    header += f"{grid_res} {(max_bounds[0]-min_bounds[0])/(grid_res-1)} 0 0\n"
+    header += f"{grid_res} 0 {(max_bounds[1]-min_bounds[1])/(grid_res-1)} 0\n"
+    header += f"{grid_res} 0 0 {(max_bounds[2]-min_bounds[2])/(grid_res-1)}\n"
     for i in range(n_atoms):
         at = mol.GetAtomWithIdx(i)
         p = pos[i]
-        cube_header += f"{at.GetAtomicNum()} {at.GetAtomicNum()}.0 {p[0]} {p[1]} {p[2]}\n"
-        
+        header += f"{at.GetAtomicNum()} {at.GetAtomicNum()}.0 {p[0]} {p[1]} {p[2]}\n"
     flat_data = grid_data.flatten()
-    cube_body = ""
-    for i in range(0, len(flat_data), 6):
-        cube_body += " ".join(f"{val:12.6E}" for val in flat_data[i:i+6]) + "\n"
-        
-    return cube_header + cube_body
+    body = "".join([" ".join(f"{val:12.6E}" for val in flat_data[i:i+6]) + "\n" for i in range(0, len(flat_data), 6)])
+    return header + body
 
 st.title("⚛️ Advanced Quantum FMO Analyzer")
 
@@ -136,6 +122,7 @@ with up_col:
 with set_col:
     n_conf = st.number_input("Conformers", 1, 100, 30)
     view_mode = st.radio("Orbital Visual:", ["Structure Only", "HOMO Lobes", "LUMO Lobes"], horizontal=True)
+    graph_mode = st.selectbox("Analysis Plot", ["FMO Gap Trend", "PES (Stability)"])
 
 mol_raw = load_molecule(uploaded_file, smiles_input)
 
@@ -166,35 +153,43 @@ if mol_raw:
 
     st.divider()
 
-    v1, v2 = st.columns([2, 1])
+    v1, v2, v3 = st.columns([1.5, 1, 1])
     with v1:
         st.write("**3D Molecular Orbitals**")
-        view = py3Dmol.view(width=600, height=450)
+        view = py3Dmol.view(width=450, height=350)
         view.addModel(Chem.MolToMolBlock(mol_hs, confId=sel_id), 'mol')
         view.setStyle({'stick': {'radius': 0.12}, 'sphere': {'scale': 0.22}})
-        
         if "Lobes" in view_mode:
-            current_orb = "HOMO" if "HOMO" in view_mode else "LUMO"
-            cube_data = make_orbital_cube(mol_hs, sel_id, current_orb)
-            # Positive Lobe (Blue)
+            cube_data = make_orbital_cube(mol_hs, sel_id, "HOMO" if "HOMO" in view_mode else "LUMO")
             view.addVolumetricData(cube_data, "cube", {'isoval': 0.08, 'color': "blue", 'opacity': 0.85})
-            # Negative Lobe (Red)
             view.addVolumetricData(cube_data, "cube", {'isoval': -0.08, 'color': "red", 'opacity': 0.85})
         else:
             view.addSurface(py3Dmol.VDW, {'opacity': 0.15, 'color': 'white'})
-            
         view.zoomTo()
-        showmol(view, height=450, width=600)
-        st.caption(f"Currently viewing: {view_mode} | 🔴 Negative Phase | 🔵 Positive Phase")
+        showmol(view, height=350, width=450)
 
     with v2:
-        st.write("**Energy Level Diagram**")
+        st.write("**Orbital Energy Diagram**")
         fig_gap = go.Figure()
-        fig_gap.add_trace(go.Scatter(x=[0, 1], y=[fmo['LUMO'], fmo['LUMO']], name="LUMO", line=dict(color='RoyalBlue', width=8)))
-        fig_gap.add_trace(go.Scatter(x=[0, 1], y=[fmo['HOMO'], fmo['HOMO']], name="HOMO", line=dict(color='Crimson', width=8)))
-        fig_gap.add_annotation(x=0.5, y=(fmo['HOMO'] + fmo['LUMO'])/2, text=f"Gap: {fmo['Gap']} eV", showarrow=False, font=dict(color="white", size=14))
-        fig_gap.update_layout(yaxis_title="Energy (eV)", height=450, showlegend=True, margin=dict(l=20, r=20, t=10, b=10))
+        fig_gap.add_trace(go.Scatter(x=[0, 1], y=[fmo['LUMO'], fmo['LUMO']], name="LUMO", line=dict(color='RoyalBlue', width=6)))
+        fig_gap.add_trace(go.Scatter(x=[0, 1], y=[fmo['HOMO'], fmo['HOMO']], name="HOMO", line=dict(color='Crimson', width=6)))
+        fig_gap.add_annotation(x=0.5, y=(fmo['HOMO'] + fmo['LUMO'])/2, text=f"ΔE={fmo['Gap']}eV", showarrow=False, font=dict(color="white"))
+        fig_gap.update_layout(yaxis_title="Energy (eV)", height=350, showlegend=False, margin=dict(l=20, r=20, t=10, b=10))
         st.plotly_chart(fig_gap, use_container_width=True)
+
+    with v3:
+        st.write("**Analysis Plot**")
+        if graph_mode == "FMO Gap Trend":
+            gaps_data = [get_fmo_descriptors(mol_hs, cid)["Gap"] for cid in sorted_ids]
+            fig = go.Figure(data=go.Scatter(x=list(range(len(gaps_data))), y=gaps_data, mode='lines+markers', line_color='orange'))
+            fig.add_trace(go.Scatter(x=[sorted_ids.index(sel_id)], y=[fmo['Gap']], mode='markers', marker=dict(color='red', size=10, symbol='star')))
+            fig.update_layout(height=350, xaxis_title="Stability Rank", yaxis_title="Gap (eV)", showlegend=False)
+        else:
+            df_pes = pd.DataFrame(conf_data)
+            fig = go.Figure(data=go.Scatter(x=list(range(len(df_pes))), y=df_pes['Rel_E'], mode='lines+markers', line_color='teal'))
+            fig.add_trace(go.Scatter(x=[sorted_ids.index(sel_id)], y=[rel_energy], mode='markers', marker=dict(color='red', size=10, symbol='star')))
+            fig.update_layout(height=350, xaxis_title="Stability Rank", yaxis_title="ΔE (kcal/mol)", showlegend=False)
+        st.plotly_chart(fig, use_container_width=True)
 
     st.divider()
     st.markdown("### 3. Coordinate Mapping")
@@ -208,4 +203,4 @@ if mol_raw:
         xyz_data = [line.split() for line in xyz_block if line.strip()]
         st.dataframe(pd.DataFrame(xyz_data, columns=["Atom", "X", "Y", "Z"]), use_container_width=True, height=250)
 else:
-    st.error("Invalid Input: Please check your file or SMILES string.")
+    st.error("Invalid Input.")
