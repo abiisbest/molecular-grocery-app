@@ -52,22 +52,17 @@ def generate_conformers(mol, num_conf):
     mol = Chem.AddHs(mol)
     cids = AllChem.EmbedMultipleConfs(mol, numConfs=num_conf, randomSeed=42, pruneRmsThresh=0.5)
     res = []
-    
     prop = AllChem.MMFFGetMoleculeProperties(mol)
-    
     for cid in cids:
         ff = AllChem.MMFFGetMoleculeForceField(mol, prop, confId=cid)
         if ff:
             ff.Minimize(maxIts=1000)
             energy = ff.CalcEnergy()
             res.append({"ID": int(cid), "E": energy})
-            
     if not res: return [], mol
-    
     min_e = min(r["E"] for r in res)
     for r in res:
         r["Rel_E"] = round(r["E"] - min_e, 6)
-    
     return sorted(res, key=lambda x: x["Rel_E"]), mol
 
 def load_molecule(up_file, smiles_str):
@@ -92,6 +87,7 @@ with up_col:
     smiles_input = st.text_input("OR Enter SMILES:", "CC1([C@@H](N2[C@H](S1)[C@@H](C2=O)NC(=O)[C@@H](C3=CC=CC=C3)N)C(=O)O)C")
 with set_col:
     n_conf = st.number_input("Conformers", 1, 100, 30)
+    orbital_view = st.radio("Show Orbital Location:", ["None", "HOMO", "LUMO"], horizontal=True)
     graph_mode = st.selectbox("Analysis Plot", ["FMO Gap Trend", "PES (Stability)"])
 
 mol_raw = load_molecule(uploaded_file, smiles_input)
@@ -125,14 +121,22 @@ if mol_raw:
 
     v1, v2, v3 = st.columns([1.5, 1, 1])
     with v1:
-        st.write("**3D Geometric Surface**")
+        st.write("**3D Geometric Surface & FMO**")
         view = py3Dmol.view(width=450, height=350)
-        view.addModel(Chem.MolToMolBlock(mol_hs, confId=sel_id), 'mol')
-        view.setStyle({'stick': {'radius': 0.2}, 'sphere': {'scale': 0.3}})
-        view.addSurface(py3Dmol.VDW, {'opacity': 0.3, 'color': 'white'})
+        mb = Chem.MolToMolBlock(mol_hs, confId=sel_id)
+        view.addModel(mb, 'mol')
+        view.setStyle({'stick': {'radius': 0.15}, 'sphere': {'scale': 0.25}})
+        
+        if orbital_view == "HOMO":
+            view.addSurface(py3Dmol.SAS, {'opacity': 0.4, 'color': 'red'})
+        elif orbital_view == "LUMO":
+            view.addSurface(py3Dmol.SAS, {'opacity': 0.4, 'color': 'blue'})
+        else:
+            view.addSurface(py3Dmol.VDW, {'opacity': 0.2, 'color': 'white'})
+            
         view.zoomTo()
         showmol(view, height=350, width=450)
-        st.caption("⚪ H | 🔘 C | 🔵 N | 🔴 O | 🟡 S")
+        st.caption("🔴 HOMO Location (Approx) | 🔵 LUMO Location (Approx)")
 
     with v2:
         st.write("**Orbital Energy Diagram**")
