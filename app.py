@@ -94,13 +94,13 @@ def make_orbital_cube(mol, conf_id, orbital_type="HOMO"):
         atom_pos = pos[i]
         symbol = atom.GetSymbol()
         if orbital_type == "HOMO":
-            weight = 2.2 if symbol in ['N', 'O', 'S', 'P'] else 0.3
+            weight = 2.4 if symbol in ['N', 'O', 'S', 'P'] else 0.4
             phase = 1 if i % 2 == 0 else -1
         else:
-            weight = 2.2 if symbol in ['C', 'F', 'Cl', 'B'] else 0.3
+            weight = 2.4 if symbol in ['C', 'F', 'Cl', 'B'] else 0.4
             phase = -1 if i % 2 == 0 else 1
         dist_sq = (X - atom_pos[0])**2 + (Y - atom_pos[1])**2 + (Z - atom_pos[2])**2
-        grid_data += phase * weight * np.exp(-dist_sq / 2.8)
+        grid_data += phase * weight * np.exp(-dist_sq / 3.0)
     header = f"Orbital\nGenerated\n{n_atoms} {min_bounds[0]} {min_bounds[1]} {min_bounds[2]}\n"
     header += f"{grid_res} {(max_bounds[0]-min_bounds[0])/(grid_res-1)} 0 0\n"
     header += f"{grid_res} 0 {(max_bounds[1]-min_bounds[1])/(grid_res-1)} 0\n"
@@ -159,14 +159,33 @@ if mol_raw:
         view = py3Dmol.view(width=450, height=350)
         view.addModel(Chem.MolToMolBlock(mol_hs, confId=sel_id), 'mol')
         view.setStyle({'stick': {'radius': 0.12}, 'sphere': {'scale': 0.22}})
+        
         if "Lobes" in view_mode:
-            cube_data = make_orbital_cube(mol_hs, sel_id, "HOMO" if "HOMO" in view_mode else "LUMO")
+            current_orb = "HOMO" if "HOMO" in view_mode else "LUMO"
+            cube_data = make_orbital_cube(mol_hs, sel_id, current_orb)
             view.addVolumetricData(cube_data, "cube", {'isoval': 0.08, 'color': "blue", 'opacity': 0.85})
             view.addVolumetricData(cube_data, "cube", {'isoval': -0.08, 'color': "red", 'opacity': 0.85})
         else:
             view.addSurface(py3Dmol.VDW, {'opacity': 0.15, 'color': 'white'})
+        
         view.zoomTo()
         showmol(view, height=350, width=450)
+        
+        # Legend Section
+        if "Lobes" in view_mode:
+            orb_name = "HOMO" if "HOMO" in view_mode else "LUMO"
+            st.markdown(f"""
+            <div style="display: flex; gap: 20px; font-size: 14px; margin-top: 10px;">
+                <div style="display: flex; align-items: center; gap: 5px;">
+                    <div style="width: 15px; height: 15px; background-color: blue; border-radius: 3px;"></div>
+                    <span>{orb_name} (+) Phase</span>
+                </div>
+                <div style="display: flex; align-items: center; gap: 5px;">
+                    <div style="width: 15px; height: 15px; background-color: red; border-radius: 3px;"></div>
+                    <span>{orb_name} (-) Phase</span>
+                </div>
+            </div>
+            """, unsafe_allow_html=True)
 
     with v2:
         st.write("**Orbital Energy Diagram**")
