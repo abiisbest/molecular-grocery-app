@@ -113,7 +113,7 @@ def make_orbital_cube(mol, conf_id, orbital_type="HOMO"):
     body = "".join([" ".join(f"{val:12.6E}" for val in flat_data[i:i+6]) + "\n" for i in range(0, len(flat_data), 6)])
     return header + body
 
-st.title("⚛️ Advanced Quantum FMO Analyzer")
+st.title("⚛️ Molecular Reactivity and Conformer Explorer")
 
 up_col, set_col = st.columns([2, 1])
 with up_col:
